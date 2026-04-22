@@ -140,10 +140,14 @@ module.exports = NodeHelper.create({
 
     // High-Res Image Logic: Use IIIF server instead of primaryimageurl if possible
     let imageUrl = d.primaryimageurl;
-    if (d.images && d.images.length > 0 && d.images[0].imageid) {
-      const imageId = d.images[0].imageid;
-      // Harvard IIIF endpoint: ids.lib.harvard.edu/ids/iiif/[id]/full/[size]/0/default.jpg
-      imageUrl = `https://ids.lib.harvard.edu/ids/iiif/${imageId}/full/${imageSize},/0/default.jpg`;
+    const baseUri = d.images?.[0]?.iiifbaseuri || d.iiifbaseuri;
+    
+    if (baseUri) {
+      // Append IIIF parameters to the base URI
+      imageUrl = `${baseUri}/full/${imageSize},/0/default.jpg`;
+    } else if (imageUrl && !imageUrl.includes("/full/")) {
+      // Some Harvard URLs are just the base, attempt to append anyway
+      imageUrl = `${imageUrl}/full/${imageSize},/0/default.jpg`;
     }
 
     return {
