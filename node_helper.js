@@ -124,36 +124,50 @@ module.exports = NodeHelper.create({
       throw new Error("Harvard Art Museums requires an API key in config. See README.");
     }
 
-    const url = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=classification:Paintings&hasimage=1&size=100&sort=rank&sortorder=desc`;
+    // Optimization: Filter for Paintings, unrestricted images (level 0), and good metadata (verification >= 3)
+    const q = encodeURIComponent("classification:Paintings AND imagepermissionlevel:0 AND verificationlevel:>=3");
+    const url = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=${q}&hasimage=1&size=100&sort=rank&sortorder=desc`;
+    
     const res = await fetchFn(url);
     const data = await res.json();
     
     if (!data.records || data.records.length === 0) return null;
     
+    // Pick based on daily seed
     const d = this._pick(data.records, seed);
 
-    // HAM Logic: description || contextualtext
-    let desc = d.description || "";
+    // HAM Description Logic: Try description -> commentary -> labeltext -> contextualtext
+    let desc = d.description || d.commentary || d.labeltext || "";
+    
+    // Fallback to contextualtext if still empty
     if (!desc && d.contextualtext && d.contextualtext.length > 0) {
-      desc = d.contextualtext[0].text;
+      // Find the longest text block in the contextual array (usually the Published Catalogue Text)
+      const sortedTexts = [...d.contextualtext].sort((a, b) => (b.text || "").length - (a.text || "").length);
+      desc = sortedTexts[0].text;
     }
 
-    // High-Res Image Logic: Use IIIF server instead of primaryimageurl if possible
+    // High-Res Image Logic: Correct IIIF usage based on documentation
     let imageUrl = d.primaryimageurl;
-    const baseUri = d.images?.[0]?.iiifbaseuri || d.iiifbaseuri;
+    // Check if the canonical image has a IIIF base URI
+    const iiifBase = d.images?.[0]?.iiifbaseuri || d.iiifbaseuri;
     
-    if (baseUri) {
-      // Append IIIF parameters to the base URI
-      imageUrl = `${baseUri}/full/${imageSize},/0/default.jpg`;
+    if (iiifBase) {
+      // Construct the high-res URL. 
+      // Documentation says base + /full/size/0/default.jpg
+      imageUrl = `${iiifBase}/full/${imageSize},/0/default.jpg`;
     } else if (imageUrl && !imageUrl.includes("/full/")) {
-      // Some Harvard URLs are just the base, attempt to append anyway
+      // Some Harvard primaryimageurls are NRS redirects that support IIIF parameters
       imageUrl = `${imageUrl}/full/${imageSize},/0/default.jpg`;
     }
+
+    // Extract Artist Display Name
+    const artistObj = d.people?.find(p => p.role === "Artist") || d.people?.[0];
+    const artist = artistObj ? artistObj.displayname : "Unknown Artist";
 
     return {
       provider: "Harvard Art Museums",
       title: d.title,
-      artist: d.people?.[0]?.displayname || "Unknown Artist",
+      artist: artist,
       date: d.dated,
       medium: d.medium,
       description: this._stripHtml(desc),
@@ -190,7 +204,9 @@ module.exports = NodeHelper.create({
       .replace(/&amp;/g, "&")
       .replace(/&#39;/g, "'")
       .replace(/&quot;/g, '"')
-      .replace(/\s+/g, " ")      // Collapse whitespace
+      .replace(/\r\n/g, " ")      // Clean newlines
+      .replace(/\n/g, " ")
+      .replace(/\s+/g, " ")       // Collapse whitespace
       .trim();
   }
 });
