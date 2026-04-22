@@ -1,0 +1,14 @@
+{
+  "provider": "Musée du Louvre (Offline Fallback)",
+  "title": "Mona Lisa (La Gioconda)",
+  "artist": "Leonardo da Vinci",
+  "date": "c. 1503–1506",
+  "medium": "Oil on poplar panel",
+  "description": "This iconic portrait depicts Lisa Gherardini, the wife of Florentine merchant Francesco del Giocondo. It is celebrated for its revolutionary use of sfumato—the subtle, smoky blending of colors and tones that creates soft transitions between light and shadow. The subject’s enigmatic expression and the complex, atmospheric landscape background established the Mona Lisa as a masterpiece of Renaissance portraiture, noted for its psychological depth and technical mastery of human anatomy and natural light.",
+  "image": "modules/MMM-MuseumMasterpiece/assets/mona_lisa.jpg",
+  "style": "High Renaissance",
+  "origin": "France",
+  "creditLine": "Musée du Louvre, Paris",
+  "dimensions": "77 cm × 53 cm (30 in × 21 in)",
+  "department": "Paintings"
+}

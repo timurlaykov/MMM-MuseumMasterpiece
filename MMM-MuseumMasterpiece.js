@@ -3,7 +3,7 @@
 Module.register("MMM-MuseumMasterpiece", {
   defaults: {
     // ── Fetch cadence ──────────────────────────────────────────────
-    updateInterval: 12 * 60 * 60 * 1000,
+    updateInterval: 3 * 60 * 60 * 1000,
     initialLoadDelay: 3000,
     refreshAtMidnight: true,
 
@@ -17,7 +17,7 @@ Module.register("MMM-MuseumMasterpiece", {
     textPosition: "right",
     imageMaxWidth: "420px",
     textAlign: "left",
-    maxDescriptionLength: 0,
+    maxDescriptionLength: 1000,
 
     // ── Show/hide toggles ──────────────────────────────────────────
     showTitle: true,
@@ -43,11 +43,28 @@ Module.register("MMM-MuseumMasterpiece", {
     attribColor: "rgba(255,255,255,0.5)"
   },
 
+  // ── Offline Fallback Data (Mona Lisa) ──────────────────────────
+  fallbackArt: {
+    provider: "Musée du Louvre (Offline Fallback)",
+    title: "Mona Lisa (La Gioconda)",
+    artist: "Leonardo da Vinci",
+    date: "c. 1503–1506",
+    medium: "Oil on poplar panel",
+    description: "This iconic portrait depicts Lisa Gherardini, the wife of Florentine merchant Francesco del Giocondo. It is celebrated for its revolutionary use of sfumato—the subtle, smoky blending of colors and tones that creates soft transitions between light and shadow. The subject’s enigmatic expression and the complex, atmospheric landscape background established the Mona Lisa as a masterpiece of Renaissance portraiture, noted for its psychological depth and technical mastery of human anatomy and natural light.",
+    image: "modules/MMM-MuseumMasterpiece/assets/mona_lisa.jpg",
+    style: "High Renaissance",
+    origin: "France",
+    creditLine: "Musée du Louvre, Paris",
+    dimensions: "77 cm × 53 cm (30 in × 21 in)",
+    department: "Paintings",
+    isOffline: true
+  },
+
   start() {
     this.loaded = false;
     this.error = null;
     this.art = null;
-    this.isFetching = false; // Background fetch flag
+    this.isFetching = false;
 
     this.sendFetchRequest();
 
@@ -77,7 +94,6 @@ Module.register("MMM-MuseumMasterpiece", {
 
   socketNotificationReceived(notif, payload) {
     if (notif === "AIC_RESULT") {
-      // ── Image Pre-loading ─────────────────────────────────────────
       const img = new Image();
       img.src = payload.image;
       img.onload = () => {
@@ -85,18 +101,29 @@ Module.register("MMM-MuseumMasterpiece", {
         this.error = null;
         this.art = payload;
         this.isFetching = false;
-        this.updateDom(1000); // Cross-fade effect
+        this.updateDom(1000);
       };
       img.onerror = () => {
         console.error("MMM-MuseumMasterpiece: Failed to pre-load image:", payload.image);
         this.isFetching = false;
-        // Optional: show whatever we have anyway or keep previous
+        // If we fail to load the remote image, keep whatever we have
       };
     } else if (notif === "AIC_ERROR") {
-      this.loaded = true;
       this.isFetching = false;
-      this.error = payload?.message || "Unknown error";
-      this.updateDom();
+      
+      // ── Offline Strategy ──────────────────────────────────────────
+      if (!this.art) {
+        // CASE: First run and no internet. Show Mona Lisa fallback.
+        console.warn("MMM-MuseumMasterpiece: Initial fetch failed. Showing offline fallback.");
+        this.art = this.fallbackArt;
+        this.loaded = true;
+        this.error = null;
+        this.updateDom(1000);
+      } else {
+        // CASE: Already had an image. DO NOTHING (Keep current image).
+        console.warn("MMM-MuseumMasterpiece: Update failed. Keeping current masterpiece on screen.");
+        // We don't updateDom, we don't show an error. We just stay persistent.
+      }
     }
   },
 
@@ -115,14 +142,8 @@ Module.register("MMM-MuseumMasterpiece", {
     wrapper.style.setProperty("--mm-attrib-size", this.config.attribFontSize);
     wrapper.style.setProperty("--mm-attrib-color", this.config.attribColor);
 
-    // Initial Loading State (only on first start)
     if (!this.loaded && !this.art) {
       wrapper.innerHTML = "<div class='mm-loading'>Loading masterpiece…</div>";
-      return wrapper;
-    }
-
-    if (this.error) {
-      wrapper.innerHTML = `<div class='mm-error'>${this.error}</div>`;
       return wrapper;
     }
 
@@ -178,7 +199,8 @@ Module.register("MMM-MuseumMasterpiece", {
       const el = document.createElement("div");
       el.className = "mm-attrib";
       let source = `Source: ${art.provider}`;
-      if (art.descriptionSource) source += ` (Story from ${art.descriptionSource})`;
+      if (art.isOffline) source = "⚠️ Mode: Offline (Displaying local masterpiece)";
+      else if (art.descriptionSource) source += ` (Story from ${art.descriptionSource})`;
       el.textContent = source;
       info.appendChild(el);
     }
