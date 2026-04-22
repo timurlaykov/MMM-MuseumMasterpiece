@@ -14,31 +14,34 @@ module.exports = NodeHelper.create({
 
   async socketNotificationReceived(notif, payload) {
     if (notif === "AIC_FETCH") {
-      const { seed, imageSize, hamApiKey, providers } = payload;
+      const { seed, imageSize, hamApiKey, rijksApiKey, providers } = payload;
       
-      // 1. Check cache first
       if (this.cache[seed]) {
         return this.sendSocketNotification("AIC_RESULT", this.cache[seed]);
       }
 
       try {
-        // 2. Determine Provider of the Day (Round-Robin) from the user's list
-        const activeProviders = (providers && providers.length > 0) ? providers : ["AIC", "CMA", "HAM"];
+        const activeProviders = (providers && providers.length > 0) ? providers : ["AIC", "CMA", "HAM", "MET", "RIJKS"];
         const dayHash = this._djb2(seed);
         const providerIndex = Math.abs(dayHash % activeProviders.length);
         const provider = activeProviders[providerIndex];
 
-        console.log(`[MMM-MuseumMasterpiece] Seed: ${seed} | Hash: ${dayHash} | Provider: ${provider}`);
+        console.log(`[MMM-MuseumMasterpiece] Seed: ${seed} | Provider: ${provider}`);
 
         let artData = null;
 
-        // 3. Fetch from the chosen provider
         switch (provider) {
           case "CMA":
             artData = await this._fetchCMA(seed);
             break;
           case "HAM":
             artData = await this._fetchHAM(seed, hamApiKey, imageSize);
+            break;
+          case "MET":
+            artData = await this._fetchMET(seed);
+            break;
+          case "RIJKS":
+            artData = await this._fetchRIJKS(seed, rijksApiKey);
             break;
           case "AIC":
           default:
@@ -47,6 +50,16 @@ module.exports = NodeHelper.create({
         }
 
         if (artData) {
+          // ── Fallback Description (Wikidata/Wikipedia) ─────────────
+          if (!artData.description || artData.description.length < 50) {
+            console.log(`[MMM-MuseumMasterpiece] Empty description for ${artData.title}. Fetching from Wikidata/Wikipedia...`);
+            const fallback = await this._fetchWikipediaSummary(artData.title, artData.artist);
+            if (fallback) {
+              artData.description = fallback;
+              artData.descriptionSource = "Wikipedia";
+            }
+          }
+
           this.cache[seed] = artData;
           this.sendSocketNotification("AIC_RESULT", artData);
         } else {
@@ -59,13 +72,12 @@ module.exports = NodeHelper.create({
     }
   },
 
-  // ── Art Institute of Chicago (AIC) Provider ───────────────────────
+  // ── Art Institute of Chicago (AIC) ────────────────────────────────
   async _fetchAIC(seed, imageSize) {
     const poolUrl = "https://api.artic.edu/api/v1/artworks/search?q=painting&is_public_domain=true&limit=100&fields=id";
     const poolRes = await fetchFn(poolUrl);
     const poolData = await poolRes.json();
-    
-    if (!poolData.data || poolData.data.length === 0) return null;
+    if (!poolData.data?.length) return null;
     
     const choice = this._pick(poolData.data, seed);
     const detailUrl = `https://api.artic.edu/api/v1/artworks/${choice.id}?fields=id,title,artist_display,date_display,medium_display,description,short_description,thumbnail,image_id,style_title,place_of_origin,credit_line,dimensions,department_title`;
@@ -91,13 +103,12 @@ module.exports = NodeHelper.create({
     };
   },
 
-  // ── Cleveland Museum of Art (CMA) Provider ────────────────────────
+  // ── Cleveland Museum of Art (CMA) ─────────────────────────────────
   async _fetchCMA(seed) {
     const url = "https://openaccess-api.clevelandart.org/api/artworks/?q=painting&has_image=1&limit=100";
     const res = await fetchFn(url);
     const data = await res.json();
-    
-    if (!data.data || data.data.length === 0) return null;
+    if (!data.data?.length) return null;
     
     const d = this._pick(data.data, seed);
 
@@ -109,7 +120,6 @@ module.exports = NodeHelper.create({
       medium: d.technique || d.type,
       description: this._stripHtml(d.description || d.wall_description || ""),
       image: d.images?.web?.url || d.images?.print?.url,
-      thumbnailLqip: null,
       style: d.culture?.[0] || null,
       origin: d.culture?.[0] || null,
       creditLine: d.creditline,
@@ -118,65 +128,38 @@ module.exports = NodeHelper.create({
     };
   },
 
-  // ── Harvard Art Museums (HAM) Provider ────────────────────────────
+  // ── Harvard Art Museums (HAM) ─────────────────────────────────────
   async _fetchHAM(seed, apiKey, imageSize) {
-    if (!apiKey) {
-      throw new Error("Harvard Art Museums requires an API key in config. See README.");
-    }
-
-    // 1. Search for artworks that DEFINITELY have descriptions or contextual text
+    if (!apiKey) throw new Error("Harvard API key required");
     const q = encodeURIComponent("classification:Paintings AND imagepermissionlevel:0 AND verificationlevel:>=3 AND (description:* OR contextualtextcount:>0)");
     const searchUrl = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=${q}&hasimage=1&size=100&sort=rank&sortorder=desc`;
-    
     const searchRes = await fetchFn(searchUrl);
     const searchData = await searchRes.json();
+    if (!searchData.records?.length) return null;
     
-    if (!searchData.records || searchData.records.length === 0) return null;
-    
-    // Pick based on daily seed
     const choice = this._pick(searchData.records, seed);
-
-    // 2. Fetch the FULL record to get contextualtext array (if needed)
     const detailUrl = `https://api.harvardartmuseums.org/object/${choice.objectid}?apikey=${apiKey}`;
     const detailRes = await fetchFn(detailUrl);
     const d = await detailRes.json();
 
-    if (!d || d.error) {
-      throw new Error(d.error || "Failed to fetch object details from Harvard");
-    }
-
-    // HAM Description Logic: description -> commentary -> labeltext -> contextualtext
     let desc = d.description || d.commentary || d.labeltext || "";
-    
-    // Fallback to contextualtext if still empty
-    if (!desc && d.contextualtext && d.contextualtext.length > 0) {
+    if (!desc && d.contextualtext?.length) {
       const sortedTexts = [...d.contextualtext].sort((a, b) => (b.text || "").length - (a.text || "").length);
       desc = sortedTexts[0].text;
     }
 
-    // High-Res Image Logic: Use IIIF base URI
     let imageUrl = d.primaryimageurl;
     const iiifBase = d.images?.[0]?.iiifbaseuri || d.iiifbaseuri;
-    
-    if (iiifBase) {
-      imageUrl = `${iiifBase}/full/${imageSize},/0/default.jpg`;
-    } else if (imageUrl && !imageUrl.includes("/full/")) {
-      imageUrl = `${imageUrl}/full/${imageSize},/0/default.jpg`;
-    }
-
-    // Extract Artist Display Name
-    const artistObj = d.people?.find(p => p.role === "Artist") || d.people?.[0];
-    const artist = artistObj ? artistObj.displayname : "Unknown Artist";
+    if (iiifBase) imageUrl = `${iiifBase}/full/${imageSize},/0/default.jpg`;
 
     return {
       provider: "Harvard Art Museums",
       title: d.title,
-      artist: artist,
+      artist: (d.people?.find(p => p.role === "Artist") || d.people?.[0])?.displayname || "Unknown Artist",
       date: d.dated,
       medium: d.medium,
       description: this._stripHtml(desc),
       image: imageUrl,
-      thumbnailLqip: null,
       style: d.period || d.culture,
       origin: d.culture,
       creditLine: d.creditline,
@@ -185,8 +168,93 @@ module.exports = NodeHelper.create({
     };
   },
 
-  // ── Helpers ───────────────────────────────────────────────────────
+  // ── Metropolitan Museum of Art (MET) ──────────────────────────────
+  async _fetchMET(seed) {
+    const searchUrl = "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=painting";
+    const searchRes = await fetchFn(searchUrl);
+    const searchData = await searchRes.json();
+    if (!searchData.objectIDs?.length) return null;
+    
+    const choiceId = this._pick(searchData.objectIDs.slice(0, 500), seed); // Sample first 500
+    const detailUrl = `https://collectionapi.metmuseum.org/public/collection/v1/objects/${choiceId}`;
+    const detailRes = await fetchFn(detailUrl);
+    const d = await detailRes.json();
 
+    return {
+      provider: "The Metropolitan Museum of Art",
+      title: d.title,
+      artist: d.artistDisplayName || "Unknown Artist",
+      date: d.objectDate,
+      medium: d.medium,
+      description: "", // MET API often has empty descriptions, Wikipedia fallback will handle it
+      image: d.primaryImage || d.primaryImageSmall,
+      style: d.culture,
+      origin: d.country || d.culture,
+      creditLine: d.creditLine,
+      dimensions: d.dimensions,
+      department: d.department
+    };
+  },
+
+  // ── Rijksmuseum (RIJKS) ───────────────────────────────────────────
+  async _fetchRIJKS(seed, apiKey) {
+    const key = apiKey || "0fS5v4TH"; // My dev key or placeholder
+    const url = `https://www.rijksmuseum.nl/api/en/collection?key=${key}&format=json&type=painting&imgonly=True&ps=100`;
+    const res = await fetchFn(url);
+    const data = await res.json();
+    if (!data.artObjects?.length) return null;
+    
+    const d = this._pick(data.artObjects, seed);
+    
+    // Get detail for better description
+    const detailUrl = `https://www.rijksmuseum.nl/api/en/collection/${d.objectNumber}?key=${key}&format=json`;
+    const detailRes = await fetchFn(detailUrl);
+    const detail = await detailRes.json();
+    const obj = detail.artObject;
+
+    return {
+      provider: "Rijksmuseum",
+      title: obj.title,
+      artist: obj.principalMaker,
+      date: obj.dating?.presentingDate,
+      medium: obj.physicalMedium,
+      description: this._stripHtml(obj.description || obj.plaqueDescriptionEnglish || ""),
+      image: obj.webImage?.url,
+      style: obj.materials?.join(", "),
+      origin: "Netherlands",
+      creditLine: "Rijksmuseum Open Access",
+      dimensions: obj.subTitle,
+      department: obj.classification?.objectName?.[0]
+    };
+  },
+
+  // ── Wikipedia/Wikidata Fallback ───────────────────────────────────
+  async _fetchWikipediaSummary(title, artist) {
+    try {
+      // 1. Search for the artwork on Wikipedia
+      const query = encodeURIComponent(`${title} ${artist}`);
+      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&format=json&origin=*`;
+      const searchRes = await fetchFn(searchUrl);
+      const searchData = await searchRes.json();
+      
+      if (!searchData.query?.search?.length) return null;
+      
+      // 2. Get the top result's summary
+      const pageTitle = encodeURIComponent(searchData.query.search[0].title);
+      const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${pageTitle}`;
+      const summaryRes = await fetchFn(summaryUrl);
+      const summaryData = await summaryRes.json();
+      
+      if (summaryData.extract) {
+        return summaryData.extract;
+      }
+    } catch (e) {
+      console.error("[MMM-MuseumMasterpiece] Wikipedia fallback failed:", e);
+    }
+    return null;
+  },
+
+  // ── Helpers ───────────────────────────────────────────────────────
   _pick(list, seed) {
     const hash = this._djb2(seed);
     return list[Math.abs(hash % list.length)];
@@ -203,14 +271,12 @@ module.exports = NodeHelper.create({
   _stripHtml(html) {
     if (!html) return "";
     return html
-      .replace(/<[^>]*>?/gm, " ") // Remove tags
-      .replace(/&nbsp;/g, " ")    // Entities
+      .replace(/<[^>]*>?/gm, " ")
+      .replace(/&nbsp;/g, " ")
       .replace(/&amp;/g, "&")
       .replace(/&#39;/g, "'")
       .replace(/&quot;/g, '"')
-      .replace(/\r\n/g, " ")      // Clean newlines
-      .replace(/\n/g, " ")
-      .replace(/\s+/g, " ")       // Collapse whitespace
+      .replace(/\s+/g, " ")
       .trim();
   }
 });

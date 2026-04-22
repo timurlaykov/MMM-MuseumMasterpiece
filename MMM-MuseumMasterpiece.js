@@ -3,20 +3,21 @@
 Module.register("MMM-MuseumMasterpiece", {
   defaults: {
     // ── Fetch cadence ──────────────────────────────────────────────
-    updateInterval: 12 * 60 * 60 * 1000, // Default: 12 hours
+    updateInterval: 12 * 60 * 60 * 1000,
     initialLoadDelay: 3000,
     refreshAtMidnight: true,
 
     // ── API settings ───────────────────────────────────────────────
-    providers: ["AIC", "CMA", "HAM"],
+    providers: ["AIC", "CMA", "HAM", "MET", "RIJKS"], 
     imageSize: 843,
     hamApiKey: "",
+    rijksApiKey: "", // Required for full Rijksmuseum access (free at rijksmuseum.nl)
 
     // ── Layout ─────────────────────────────────────────────────────
     textPosition: "right",
     imageMaxWidth: "420px",
     textAlign: "left",
-    maxDescriptionLength: 500,
+    maxDescriptionLength: 0, // 0 = unlimited
 
     // ── Show/hide toggles ──────────────────────────────────────────
     showTitle: true,
@@ -63,6 +64,7 @@ Module.register("MMM-MuseumMasterpiece", {
       seed: this._getSeed(),
       imageSize: this.config.imageSize,
       hamApiKey: this.config.hamApiKey,
+      rijksApiKey: this.config.rijksApiKey,
       providers: this.config.providers
     });
   },
@@ -119,10 +121,6 @@ Module.register("MMM-MuseumMasterpiece", {
     const img = document.createElement("img");
     img.className = "mm-image";
     img.src = art.image;
-    if (art.thumbnailLqip) {
-      img.style.backgroundImage = `url(${art.thumbnailLqip})`;
-      img.style.backgroundSize = "cover";
-    }
 
     const info = document.createElement("div");
     info.className = "mm-info";
@@ -151,13 +149,6 @@ Module.register("MMM-MuseumMasterpiece", {
       info.appendChild(el);
     }
 
-    if (this.config.showStyle && art.style) {
-      const el = document.createElement("div");
-      el.className = "mm-body";
-      el.textContent = `Style: ${art.style}`;
-      info.appendChild(el);
-    }
-
     if (this.config.showDescription && art.description) {
       const el = document.createElement("div");
       el.className = "mm-description";
@@ -172,7 +163,9 @@ Module.register("MMM-MuseumMasterpiece", {
     if (this.config.showAttribution) {
       const el = document.createElement("div");
       el.className = "mm-attrib";
-      el.textContent = `Source: ${art.provider}`;
+      let source = `Source: ${art.provider}`;
+      if (art.descriptionSource) source += ` (Story from ${art.descriptionSource})`;
+      el.textContent = source;
       info.appendChild(el);
     }
 
@@ -190,19 +183,15 @@ Module.register("MMM-MuseumMasterpiece", {
 
   _getSeed() {
     const d = new Date();
-    // Daily seed
     let seed = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    
-    // If updateInterval is short (less than an hour), make the seed more granular for testing/rotation
     if (this.config.updateInterval < 60 * 60 * 1000) {
       seed += `-${d.getHours()}-${d.getMinutes()}`;
     }
-    
     return seed;
   },
 
   _effectiveInterval() {
-    return Math.max(Number(this.config.updateInterval) || 0, 10 * 1000); // Min 10 seconds
+    return Math.max(Number(this.config.updateInterval) || 0, 10 * 1000);
   },
 
   _scheduleMidnightRefresh() {
