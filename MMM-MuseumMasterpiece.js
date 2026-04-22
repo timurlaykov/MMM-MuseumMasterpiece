@@ -3,14 +3,14 @@
 Module.register("MMM-MuseumMasterpiece", {
   defaults: {
     // ── Fetch cadence ──────────────────────────────────────────────
-    updateInterval: 12 * 60 * 60 * 1000,
+    updateInterval: 12 * 60 * 60 * 1000, // Default: 12 hours
     initialLoadDelay: 3000,
     refreshAtMidnight: true,
 
     // ── API settings ───────────────────────────────────────────────
-    providers: ["AIC", "CMA", "HAM"], // Rotation list: AIC, CMA, HAM
+    providers: ["AIC", "CMA", "HAM"],
     imageSize: 843,
-    hamApiKey: "", // Required for Harvard Art Museums
+    hamApiKey: "",
 
     // ── Layout ─────────────────────────────────────────────────────
     textPosition: "right",
@@ -47,18 +47,24 @@ Module.register("MMM-MuseumMasterpiece", {
     this.error = null;
     this.art = null;
 
-    const fetchNow = () => this.sendSocketNotification("AIC_FETCH", {
-      seed: this._todaySeed(),
+    this.sendFetchRequest();
+
+    this._intervalId = setInterval(() => {
+      this.sendFetchRequest();
+    }, this._effectiveInterval());
+
+    if (this.config.refreshAtMidnight) {
+      this._scheduleMidnightRefresh();
+    }
+  },
+
+  sendFetchRequest() {
+    this.sendSocketNotification("AIC_FETCH", {
+      seed: this._getSeed(),
       imageSize: this.config.imageSize,
       hamApiKey: this.config.hamApiKey,
       providers: this.config.providers
     });
-
-    setTimeout(fetchNow, this.config.initialLoadDelay);
-    this._intervalId = setInterval(fetchNow, this._effectiveInterval());
-    if (this.config.refreshAtMidnight) {
-      this._scheduleMidnightRefresh();
-    }
   },
 
   getStyles() {
@@ -83,7 +89,6 @@ Module.register("MMM-MuseumMasterpiece", {
     const wrapper = document.createElement("div");
     wrapper.className = "mm-root";
 
-    // Inject CSS variables
     wrapper.style.setProperty("--mm-image-max-width", this.config.imageMaxWidth);
     wrapper.style.setProperty("--mm-text-align", this.config.textAlign);
     wrapper.style.setProperty("--mm-title-size", this.config.titleFontSize);
@@ -171,7 +176,6 @@ Module.register("MMM-MuseumMasterpiece", {
       info.appendChild(el);
     }
 
-    // Assemble layout
     if (this.config.textPosition === "left" || this.config.textPosition === "top") {
       card.appendChild(info);
       card.appendChild(img);
@@ -184,25 +188,28 @@ Module.register("MMM-MuseumMasterpiece", {
     return wrapper;
   },
 
-  _todaySeed() {
+  _getSeed() {
     const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    // Daily seed
+    let seed = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    
+    // If updateInterval is short (less than an hour), make the seed more granular for testing/rotation
+    if (this.config.updateInterval < 60 * 60 * 1000) {
+      seed += `-${d.getHours()}-${d.getMinutes()}`;
+    }
+    
+    return seed;
   },
 
   _effectiveInterval() {
-    return Math.max(Number(this.config.updateInterval) || 0, 10 * 60 * 1000);
+    return Math.max(Number(this.config.updateInterval) || 0, 10 * 1000); // Min 10 seconds
   },
 
   _scheduleMidnightRefresh() {
     const next = new Date();
     next.setHours(24, 0, 0, 0);
     this._midnightTimeout = setTimeout(() => {
-      this.sendSocketNotification("AIC_FETCH", {
-        seed: this._todaySeed(),
-        imageSize: this.config.imageSize,
-        hamApiKey: this.config.hamApiKey,
-        providers: this.config.providers
-      });
+      this.sendFetchRequest();
       this._scheduleMidnightRefresh();
     }, next - new Date());
   }
