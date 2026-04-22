@@ -12,6 +12,7 @@ Module.register("MMM-MuseumMasterpiece", {
     imageSize: 843,
     hamApiKey: "",
     rijksApiKey: "",
+    forceOffline: false, // 🧪 TEST MODE: Set to true to simulate no internet
 
     // ── Layout ─────────────────────────────────────────────────────
     textPosition: "right",
@@ -78,6 +79,14 @@ Module.register("MMM-MuseumMasterpiece", {
   },
 
   sendFetchRequest() {
+    if (this.config.forceOffline) {
+      console.warn("MMM-MuseumMasterpiece: forceOffline is enabled. Simulating network failure.");
+      setTimeout(() => {
+        this.socketNotificationReceived("AIC_ERROR", { message: "Simulated network failure" });
+      }, 500);
+      return;
+    }
+
     this.isFetching = true;
     this.sendSocketNotification("AIC_FETCH", {
       seed: this._getSeed(),
@@ -106,23 +115,17 @@ Module.register("MMM-MuseumMasterpiece", {
       img.onerror = () => {
         console.error("MMM-MuseumMasterpiece: Failed to pre-load image:", payload.image);
         this.isFetching = false;
-        // If we fail to load the remote image, keep whatever we have
       };
     } else if (notif === "AIC_ERROR") {
       this.isFetching = false;
       
-      // ── Offline Strategy ──────────────────────────────────────────
       if (!this.art) {
-        // CASE: First run and no internet. Show Mona Lisa fallback.
-        console.warn("MMM-MuseumMasterpiece: Initial fetch failed. Showing offline fallback.");
         this.art = this.fallbackArt;
         this.loaded = true;
         this.error = null;
         this.updateDom(1000);
       } else {
-        // CASE: Already had an image. DO NOTHING (Keep current image).
-        console.warn("MMM-MuseumMasterpiece: Update failed. Keeping current masterpiece on screen.");
-        // We don't updateDom, we don't show an error. We just stay persistent.
+        console.warn("MMM-MuseumMasterpiece: Update failed. Keeping current masterpiece.");
       }
     }
   },
