@@ -9,13 +9,14 @@ Unlike other art modules that only show basic metadata, this module focuses on t
 
 ## ✨ Features
 
-- 🌍 **Global Rotation** — Supports masterpieces from the **Art Institute of Chicago**, **Cleveland Museum of Art**, and **Harvard Art Museums**.
+- 🌍 **Global Rotation** — Supports masterpieces from the **Art Institute of Chicago**, **Cleveland Museum of Art**, **Harvard Art Museums**, **The Metropolitan Museum of Art (NY)**, and the **Rijksmuseum (Amsterdam)**.
 - 📖 **Curator's Stories** — Full art-historical descriptions, not just labels.
-- 🔄 **Configurable Rotation** — Choose which museums to include and their order in your config.
-- 🕛 **Deterministic Daily Refresh** — Automatically switches to a new artwork at midnight. All mirrors on your network will show the same masterpiece.
-- 🖼️ **High-Res IIIF Images** — Museum-grade resolution using the IIIF protocol.
+- 🧠 **AI/Wikipedia Research** — If a museum provides sparse data, the module automatically queries **Wikipedia** to fetch a high-quality summary of the artwork.
+- 🖼️ **High-Res IIIF Images** — Museum-grade resolution using the IIIF protocol (supports Harvard's max resolution).
+- 🔄 **Strict Narrative Policy** — Automatically "re-rolls" the selection if an artwork lacks a high-quality description, ensuring your mirror is never silent.
+- 🧈 **Smooth Transitions** — Background pre-loading ensures the next artwork cross-fades instantly once the image is fully downloaded.
+- 🕛 **Deterministic Daily Refresh** — Automatically switches at midnight. All mirrors globally show the same masterpiece for a shared cultural experience.
 - 📱 **Adaptive Layouts** — Side-by-side (Picture/Text) or Vertical (Plaque) layouts.
-- 🎛️ **Fully Styleable** — Customize font sizes, colors, and image widths directly from `config.js`.
 
 ## 🚀 Installation
 
@@ -45,13 +46,14 @@ Add the following to your `config/config.js` file:
   position: "lower_third", // Works best in lower_third or bottom_bar for wide layouts
   config: {
     // --- Providers ---
-    providers: ["AIC", "CMA", "HAM"],   // AIC = Chicago, CMA = Cleveland, HAM = Harvard
-    hamApiKey: "YOUR_HARVARD_API_KEY",  // Get one free at harvardartmuseums.org
+    providers: ["AIC", "CMA", "HAM", "MET", "RIJKS"], 
+    hamApiKey: "YOUR_HARVARD_API_KEY",    // Free at harvardartmuseums.org
+    rijksApiKey: "YOUR_RIJKS_API_KEY",    // Free at rijksmuseum.nl
     
     // --- Layout ---
     textPosition: "right",              // "left" | "right" | "top" | "bottom"
-    imageMaxWidth: "500px",             // Size of the artwork
-    maxDescriptionLength: 0,            // 0 = unlimited (show the whole story)
+    imageMaxWidth: "500px",             // Width of the artwork
+    maxDescriptionLength: 1000,         // Limit text length (0 = unlimited)
     
     // --- Style ---
     titleFontSize: "36px",
@@ -71,9 +73,11 @@ Add the following to your `config/config.js` file:
 | :--- | :--- | :--- | :--- |
 | **AIC** | Art Institute of Chicago | No | ⭐⭐⭐⭐⭐ (Historical) |
 | **CMA** | Cleveland Museum of Art | No | ⭐⭐⭐⭐ (Descriptive) |
-| **HAM** | Harvard Art Museums | **Yes** | ⭐⭐⭐ (Contextual) |
+| **RIJKS** | Rijksmuseum (Amsterdam) | **Yes** (Free) | ⭐⭐⭐⭐⭐ (Masterclass) |
+| **HAM** | Harvard Art Museums | **Yes** (Free) | ⭐⭐⭐⭐ (Curated) |
+| **MET** | Metropolitan Museum (NY) | No | ⭐⭐⭐ (Enhanced by Wikipedia) |
 
-*Note: For Harvard Art Museums, if the primary description is empty, the module will automatically fall back to the `contextual_text` field.*
+*Note: For all museums, the module automatically uses **Wikipedia** as a secondary researcher if the primary museum record is missing a description.*
 
 ## 🎨 Styling Variables
 
@@ -87,18 +91,19 @@ You can fine-tune the look by adjusting these in the `config`:
 ## 🔧 Troubleshooting
 
 ### My display is blank
-Check the MagicMirror server logs. If you are using **HAM** (Harvard) without an API key, the module will throw an error in the console.
+Check the MagicMirror server logs (`pm2 logs` or `npm start`). 
+- **Missing API Key**: Ensure you've added your keys for **HAM** and **RIJKS**.
+- **No Story found**: If the module can't find a story for 5 artworks in a row, it will throw an error. Check your internet connection.
 
-### The text is cut off
-If your mirror's region is too small, the text may be clipped. 
-1. Use `position: "lower_third"` for full-width spanning.
-2. Set `textPosition: "right"` to use a side-by-side layout.
-3. Reduce `imageMaxWidth` to give the text more horizontal room.
+### The text is too long or cut off
+1. Use `maxDescriptionLength` (e.g., 500) to trim long Wikipedia entries.
+2. Reduce `imageMaxWidth` to give the text more horizontal room.
+3. Use `position: "lower_third"` for the best panoramic experience.
 
 ## 📄 License
 MIT — See [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
-- Data provided by the Art Institute of Chicago, Cleveland Museum of Art, and Harvard Art Museums.
-- IIIF Consortium for the image delivery standard.
-- MMM-DailyMetArt for architectural inspiration.
+- Data provided by AIC, CMA, HAM, The MET, and Rijksmuseum.
+- Wikipedia REST API for the artwork story fallback.
+- IIIF Consortium for image delivery standards.
