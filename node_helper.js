@@ -10,6 +10,8 @@ module.exports = NodeHelper.create({
   start() {
     console.log(`[MMM-MuseumMasterpiece] Backend helper started.`);
     this.cache = {}; // Cache results by date seed: { "2026-04-21": { artData } }
+    this.cacheOrder = []; // Track keys for memory management
+    this.maxCacheEntries = 10; // Keep only last 10 entries to prevent memory growth
   },
 
   async socketNotificationReceived(notif, payload) {
@@ -26,7 +28,6 @@ module.exports = NodeHelper.create({
         let activeSeed = seed;
         const maxAttempts = 5;
 
-        // Loop until we find an artwork with a description
         while (attempts < maxAttempts) {
           const activeProviders = (providers && providers.length > 0) ? providers : ["AIC", "CMA", "HAM", "MET", "RIJKS"];
           const dayHash = this._djb2(activeSeed);
@@ -45,9 +46,7 @@ module.exports = NodeHelper.create({
           }
 
           if (artData) {
-            // Try Wikipedia fallback if museum description is missing/short
             if (!artData.description || artData.description.length < 50) {
-              console.log(`[MMM-MuseumMasterpiece] Short description for ${artData.title}. Trying Wikipedia...`);
               const fallback = await this._fetchWikipediaSummary(artData.title, artData.artist);
               if (fallback) {
                 artData.description = fallback;
@@ -55,22 +54,18 @@ module.exports = NodeHelper.create({
               }
             }
 
-            // Final check: Do we have a valid description now?
             if (artData.description && artData.description.length > 50) {
-              console.log(`[MMM-MuseumMasterpiece] Success! Found description for ${artData.title}`);
               break;
             } else {
-              console.warn(`[MMM-MuseumMasterpiece] Still no description for ${artData.title}. Skipping...`);
-              artData = null; // Mark as failed to trigger retry
+              artData = null;
             }
           }
-
           attempts++;
           activeSeed = `${seed}-retry${attempts}`;
         }
 
         if (artData) {
-          this.cache[seed] = artData;
+          this._addToCache(seed, artData);
           this.sendSocketNotification("AIC_RESULT", artData);
         } else {
           throw new Error(`Exhausted ${maxAttempts} attempts. Could not find an artwork with a description.`);
@@ -79,6 +74,16 @@ module.exports = NodeHelper.create({
         console.error(`[MMM-MuseumMasterpiece] Fetch error:`, err);
         this.sendSocketNotification("AIC_ERROR", { message: err.message });
       }
+    }
+  },
+
+  _addToCache(seed, data) {
+    // Prevent memory overflow by keeping only the most recent entries
+    this.cache[seed] = data;
+    this.cacheOrder.push(seed);
+    if (this.cacheOrder.length > this.maxCacheEntries) {
+      const oldKey = this.cacheOrder.shift();
+      delete this.cache[oldKey];
     }
   },
 
