@@ -1,169 +1,184 @@
 const NodeHelper = require("node_helper");
 
-// Prefer global fetch if available (Node 18+), else fall back to node-fetch v2.
+// ── Fetch fallback (Native fetch in Node 18+, fallback to node-fetch v2) ─────
 let fetchFn = global.fetch;
 if (!fetchFn) {
   try { fetchFn = require("node-fetch"); } catch (_) {}
 }
-const fetch = (...args) => fetchFn(...args);
-
-const AIC_BASE = "https://api.artic.edu/api/v1";
-const IIIF_BASE = "https://www.artic.edu/iiif/2";
-
-// Fields we request from the API — keeps responses lean
-const ARTWORK_FIELDS = [
-  "id", "title", "artist_display", "date_display",
-  "medium_display", "description", "short_description",
-  "thumbnail", "image_id", "classification_title",
-  "department_title", "place_of_origin", "credit_line",
-  "dimensions", "artwork_type_title", "style_title"
-].join(",");
 
 module.exports = NodeHelper.create({
   start() {
-    this.cache = {};
-    this.artworkIds = null;  // cached list of public-domain painting IDs
-    this.artworkIdsFetchedAt = 0;
+    console.log(`[MMM-MuseumMasterpiece] Backend helper started.`);
+    this.cache = {}; // Cache results by date seed: { "2026-04-21": { artData } }
   },
 
-  socketNotificationReceived(notif, payload) {
+  async socketNotificationReceived(notif, payload) {
     if (notif === "AIC_FETCH") {
-      this.fetchArt(payload).catch(err => {
-        console.error("[MMM-MuseumMasterpiece] Error:", err.message || err);
-        this.sendSocketNotification("AIC_ERROR", { message: err?.message || String(err) });
-      });
+      const { seed, imageSize, hamApiKey } = payload;
+      
+      // 1. Check cache first
+      if (this.cache[seed]) {
+        return this.sendSocketNotification("AIC_RESULT", this.cache[seed]);
+      }
+
+      try {
+        // 2. Determine Provider of the Day (Round-Robin)
+        const providers = ["AIC", "CMA", "HAM"];
+        const dayHash = this._djb2(seed);
+        const providerIndex = Math.abs(dayHash % providers.length);
+        const provider = providers[providerIndex];
+
+        console.log(`[MMM-MuseumMasterpiece] Seed: ${seed} | Hash: ${dayHash} | Provider: ${provider}`);
+
+        let artData = null;
+
+        // 3. Fetch from the chosen provider
+        switch (provider) {
+          case "CMA":
+            artData = await this._fetchCMA(seed);
+            break;
+          case "HAM":
+            artData = await this._fetchHAM(seed, hamApiKey);
+            break;
+          case "AIC":
+          default:
+            artData = await this._fetchAIC(seed, imageSize);
+            break;
+        }
+
+        if (artData) {
+          this.cache[seed] = artData;
+          this.sendSocketNotification("AIC_RESULT", artData);
+        } else {
+          throw new Error(`Failed to fetch from ${provider}`);
+        }
+      } catch (err) {
+        console.error(`[MMM-MuseumMasterpiece] Fetch error:`, err);
+        this.sendSocketNotification("AIC_ERROR", { message: err.message });
+      }
     }
   },
 
-  /**
-   * Main fetch logic:
-   * 1. Search for public-domain paintings with images (cached for 24h).
-   * 2. Deterministically pick one based on the date seed.
-   * 3. Fetch full artwork details including the curator description.
-   * 4. Construct the IIIF image URL at the configured resolution.
-   * 5. Send the result back to the frontend module.
-   */
-  async fetchArt({ seed, imageSize }) {
-    // Return from daily cache if we already fetched this seed
-    if (seed && this.cache[seed]) {
-      this.sendSocketNotification("AIC_RESULT", this.cache[seed]);
-      return;
-    }
+  // ── Art Institute of Chicago (AIC) Provider ───────────────────────
+  async _fetchAIC(seed, imageSize) {
+    const poolUrl = "https://api.artic.edu/api/v1/artworks/search?q=painting&is_public_domain=true&limit=100&fields=id";
+    const poolRes = await fetchFn(poolUrl);
+    const poolData = await poolRes.json();
+    
+    if (!poolData.data || poolData.data.length === 0) return null;
+    
+    const choice = this._pick(poolData.data, seed);
+    const detailUrl = `https://api.artic.edu/api/v1/artworks/${choice.id}?fields=id,title,artist_display,date_display,medium_display,description,short_description,thumbnail,image_id,style_title,place_of_origin,credit_line,dimensions,department_title`;
+    
+    const detailRes = await fetchFn(detailUrl);
+    const detail = await detailRes.json();
+    const d = detail.data;
 
-    // Step 1: Get a pool of public-domain painting IDs (cached 24h)
-    const ids = await this._getArtworkPool();
-    if (!ids.length) throw new Error("No public-domain artworks found.");
-
-    // Step 2: Pick one deterministically from the pool
-    const id = this._pick(ids, seed);
-
-    // Step 3: Fetch full details for the selected artwork
-    const url = `${AIC_BASE}/artworks/${id}?fields=${ARTWORK_FIELDS}`;
-    const response = await this._json(url);
-    const obj = response.data;
-
-    if (!obj || !obj.image_id) {
-      throw new Error("Selected artwork has no image.");
-    }
-
-    // Step 4: Construct IIIF image URL
-    // Format: {iiif_base}/{image_id}/full/{size}/0/default.jpg
-    const size = imageSize || 843;
-    const imageUrl = `${IIIF_BASE}/${obj.image_id}/full/${size},/0/default.jpg`;
-
-    // Step 5: Clean up the description HTML to plain text
-    const description = this._stripHtml(obj.description || obj.short_description || "");
-
-    const payload = {
-      image: imageUrl,
-      title: obj.title || "Untitled",
-      artist: obj.artist_display || "Unknown Artist",
-      date: obj.date_display || "",
-      medium: obj.medium_display || "",
-      department: obj.department_title || "",
-      classification: obj.classification_title || "",
-      origin: obj.place_of_origin || "",
-      creditLine: obj.credit_line || "",
-      dimensions: obj.dimensions || "",
-      style: obj.style_title || "",
-      description: description,
-      artworkUrl: `https://www.artic.edu/artworks/${obj.id}`,
-      thumbnailLqip: obj.thumbnail?.lqip || null
+    return {
+      provider: "Art Institute of Chicago",
+      title: d.title,
+      artist: d.artist_display,
+      date: d.date_display,
+      medium: d.medium_display,
+      description: this._stripHtml(d.description || d.short_description || ""),
+      image: `https://www.artic.edu/iiif/2/${d.image_id}/full/${imageSize},/0/default.jpg`,
+      thumbnailLqip: d.thumbnail?.lqip || null,
+      style: d.style_title,
+      origin: d.place_of_origin,
+      creditLine: d.credit_line,
+      dimensions: d.dimensions,
+      department: d.department_title
     };
-
-    // Cache by date seed
-    if (seed) this.cache[seed] = payload;
-    this.sendSocketNotification("AIC_RESULT", payload);
   },
 
-  /**
-   * Fetches a pool of public-domain artwork IDs from the search endpoint.
-   * Uses Elasticsearch query syntax to filter for:
-   *   - Public domain artworks only
-   *   - Artworks that have images
-   * Results are cached for 24 hours to avoid hammering the API.
-   */
-  async _getArtworkPool() {
-    const ONE_DAY = 24 * 60 * 60 * 1000;
-    if (this.artworkIds && (Date.now() - this.artworkIdsFetchedAt < ONE_DAY)) {
-      return this.artworkIds;
+  // ── Cleveland Museum of Art (CMA) Provider ────────────────────────
+  async _fetchCMA(seed) {
+    const url = "https://openaccess-api.clevelandart.org/api/artworks/?q=painting&has_image=1&limit=100";
+    const res = await fetchFn(url);
+    const data = await res.json();
+    
+    if (!data.data || data.data.length === 0) return null;
+    
+    const d = this._pick(data.data, seed);
+
+    return {
+      provider: "Cleveland Museum of Art",
+      title: d.title,
+      artist: d.creators?.[0]?.description || "Unknown Artist",
+      date: d.creation_date,
+      medium: d.technique || d.type,
+      description: this._stripHtml(d.description || d.wall_description || ""),
+      image: d.images?.web?.url || d.images?.print?.url,
+      thumbnailLqip: null,
+      style: d.culture?.[0] || null,
+      origin: d.culture?.[0] || null,
+      creditLine: d.creditline,
+      dimensions: d.dimensions,
+      department: d.department
+    };
+  },
+
+  // ── Harvard Art Museums (HAM) Provider ────────────────────────────
+  async _fetchHAM(seed, apiKey) {
+    if (!apiKey) {
+      throw new Error("Harvard Art Museums requires an API key in config. See README.");
     }
 
-    // Use the search endpoint with Elasticsearch body
-    // We request a large batch of IDs (100 pages × 100 items = up to 10,000)
-    // but only need the IDs, so it's very lightweight
-    const searchUrl = `${AIC_BASE}/artworks/search?q=painting&is_public_domain=true&limit=100&fields=id,image_id&page=1`;
-    const result = await this._json(searchUrl);
+    const url = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=classification:Paintings&hasimage=1&size=100&sort=rank&sortorder=desc`;
+    const res = await fetchFn(url);
+    const data = await res.json();
+    
+    if (!data.records || data.records.length === 0) return null;
+    
+    const d = this._pick(data.records, seed);
 
-    // Filter to artworks that actually have an image_id
-    const ids = (result.data || [])
-      .filter(item => item.image_id)
-      .map(item => item.id);
-
-    this.artworkIds = ids;
-    this.artworkIdsFetchedAt = Date.now();
-    return ids;
-  },
-
-  /**
-   * Fetch JSON from a URL with timeout protection.
-   */
-  async _json(url) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    try {
-      const r = await fetch(url, { signal: controller.signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status} from ${url}`);
-      return r.json();
-    } finally {
-      clearTimeout(timeout);
+    // HAM Logic: description || contextualtext
+    let desc = d.description || "";
+    if (!desc && d.contextualtext && d.contextualtext.length > 0) {
+      desc = d.contextualtext[0].text;
     }
+
+    return {
+      provider: "Harvard Art Museums",
+      title: d.title,
+      artist: d.people?.[0]?.displayname || "Unknown Artist",
+      date: d.dated,
+      medium: d.medium,
+      description: this._stripHtml(desc),
+      image: d.primaryimageurl,
+      thumbnailLqip: null,
+      style: d.period || d.culture,
+      origin: d.culture,
+      creditLine: d.creditline,
+      dimensions: d.dimensions,
+      department: d.department
+    };
   },
 
-  /**
-   * Deterministic pick: same seed (date string) always returns the same artwork.
-   * Uses a simple DJB2 hash to convert the seed string to an index.
-   */
+  // ── Helpers ───────────────────────────────────────────────────────
+
   _pick(list, seed) {
-    if (!seed) return list[Math.floor(Math.random() * list.length)];
-    let h = 5381;
-    for (const c of seed) { h = ((h << 5) + h) + c.charCodeAt(0); h |= 0; }
-    return list[Math.abs(h) % list.length];
+    const hash = this._djb2(seed);
+    return list[Math.abs(hash % list.length)];
   },
 
-  /**
-   * Strip HTML tags from a string and clean up whitespace.
-   * The AIC API returns descriptions with <p>, <em>, <a> tags etc.
-   */
+  _djb2(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) + hash + str.charCodeAt(i);
+    }
+    return hash;
+  },
+
   _stripHtml(html) {
     if (!html) return "";
     return html
-      .replace(/<[^>]*>/g, "")       // Remove HTML tags
-      .replace(/\\n/g, " ")           // Replace escaped newlines
-      .replace(/\s+/g, " ")           // Collapse whitespace
-      .replace(/\\u[\dA-Fa-f]{4}/g, match => {
-        return String.fromCharCode(parseInt(match.replace("\\u", ""), 16));
-      })
+      .replace(/<[^>]*>?/gm, " ") // Remove tags
+      .replace(/&nbsp;/g, " ")    // Entities
+      .replace(/&amp;/g, "&")
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/\s+/g, " ")      // Collapse whitespace
       .trim();
   }
 });
