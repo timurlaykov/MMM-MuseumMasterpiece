@@ -38,7 +38,7 @@ module.exports = NodeHelper.create({
             artData = await this._fetchCMA(seed);
             break;
           case "HAM":
-            artData = await this._fetchHAM(seed, hamApiKey);
+            artData = await this._fetchHAM(seed, hamApiKey, imageSize);
             break;
           case "AIC":
           default:
@@ -119,7 +119,7 @@ module.exports = NodeHelper.create({
   },
 
   // ── Harvard Art Museums (HAM) Provider ────────────────────────────
-  async _fetchHAM(seed, apiKey) {
+  async _fetchHAM(seed, apiKey, imageSize) {
     if (!apiKey) {
       throw new Error("Harvard Art Museums requires an API key in config. See README.");
     }
@@ -138,6 +138,14 @@ module.exports = NodeHelper.create({
       desc = d.contextualtext[0].text;
     }
 
+    // High-Res Image Logic: Use IIIF server instead of primaryimageurl if possible
+    let imageUrl = d.primaryimageurl;
+    if (d.images && d.images.length > 0 && d.images[0].imageid) {
+      const imageId = d.images[0].imageid;
+      // Harvard IIIF endpoint: ids.lib.harvard.edu/ids/iiif/[id]/full/[size]/0/default.jpg
+      imageUrl = `https://ids.lib.harvard.edu/ids/iiif/${imageId}/full/${imageSize},/0/default.jpg`;
+    }
+
     return {
       provider: "Harvard Art Museums",
       title: d.title,
@@ -145,7 +153,7 @@ module.exports = NodeHelper.create({
       date: d.dated,
       medium: d.medium,
       description: this._stripHtml(desc),
-      image: d.primaryimageurl,
+      image: imageUrl,
       thumbnailLqip: null,
       style: d.period || d.culture,
       origin: d.culture,
