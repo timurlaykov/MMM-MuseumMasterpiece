@@ -11,13 +11,13 @@ Module.register("MMM-MuseumMasterpiece", {
     providers: ["AIC", "CMA", "HAM", "MET", "RIJKS"], 
     imageSize: 843,
     hamApiKey: "",
-    rijksApiKey: "", // Required for full Rijksmuseum access (free at rijksmuseum.nl)
+    rijksApiKey: "",
 
     // ── Layout ─────────────────────────────────────────────────────
     textPosition: "right",
     imageMaxWidth: "420px",
     textAlign: "left",
-    maxDescriptionLength: 0, // 0 = unlimited
+    maxDescriptionLength: 0,
 
     // ── Show/hide toggles ──────────────────────────────────────────
     showTitle: true,
@@ -47,6 +47,7 @@ Module.register("MMM-MuseumMasterpiece", {
     this.loaded = false;
     this.error = null;
     this.art = null;
+    this.isFetching = false; // Background fetch flag
 
     this.sendFetchRequest();
 
@@ -60,6 +61,7 @@ Module.register("MMM-MuseumMasterpiece", {
   },
 
   sendFetchRequest() {
+    this.isFetching = true;
     this.sendSocketNotification("AIC_FETCH", {
       seed: this._getSeed(),
       imageSize: this.config.imageSize,
@@ -75,14 +77,25 @@ Module.register("MMM-MuseumMasterpiece", {
 
   socketNotificationReceived(notif, payload) {
     if (notif === "AIC_RESULT") {
-      this.loaded = true;
-      this.error = null;
-      this.art = payload;
-      this.updateDom(1000);
+      // ── Image Pre-loading ─────────────────────────────────────────
+      const img = new Image();
+      img.src = payload.image;
+      img.onload = () => {
+        this.loaded = true;
+        this.error = null;
+        this.art = payload;
+        this.isFetching = false;
+        this.updateDom(1000); // Cross-fade effect
+      };
+      img.onerror = () => {
+        console.error("MMM-MuseumMasterpiece: Failed to pre-load image:", payload.image);
+        this.isFetching = false;
+        // Optional: show whatever we have anyway or keep previous
+      };
     } else if (notif === "AIC_ERROR") {
       this.loaded = true;
+      this.isFetching = false;
       this.error = payload?.message || "Unknown error";
-      this.art = null;
       this.updateDom();
     }
   },
@@ -102,7 +115,8 @@ Module.register("MMM-MuseumMasterpiece", {
     wrapper.style.setProperty("--mm-attrib-size", this.config.attribFontSize);
     wrapper.style.setProperty("--mm-attrib-color", this.config.attribColor);
 
-    if (!this.loaded) {
+    // Initial Loading State (only on first start)
+    if (!this.loaded && !this.art) {
       wrapper.innerHTML = "<div class='mm-loading'>Loading masterpiece…</div>";
       return wrapper;
     }
