@@ -36,16 +36,26 @@ Unlike other art modules that only show the artist's name, this module displays 
    npm install
    ```
 
-4. Add the module to your `config/config.js`:
+4. Add the module to your `config/config.js` file:
+   
+   Open your configuration file:
+   ```bash
+   nano ~/MagicMirror/config/config.js
+   ```
+
+   Add the following object to the `modules: [...]` array:
+
    ```javascript
    {
      module: "MMM-MuseumMasterpiece",
-     position: "bottom_left",
+     position: "bottom_left", // Choose any valid position
      config: {
-       // See configuration options below
+       showDescription: true,      // Set to true to show the curator's story
+       textPosition: "bottom",     // Position text relative to image (left, right, top, bottom)
+       imageMaxWidth: "400px",     // Adjust based on your screen size
+       refreshAtMidnight: true     // Confirmed: Automatically updates to a new artwork at 00:00:00
      }
-   }
-   ```
+   },
 
 ## ⚙️ Configuration
 
