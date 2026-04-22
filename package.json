@@ -1,0 +1,25 @@
+{
+  "name": "mmm-museummasterpiece",
+  "version": "1.0.0",
+  "description": "A MagicMirror² module that displays a daily masterpiece with full curator's description from the Art Institute of Chicago",
+  "main": "MMM-MuseumMasterpiece.js",
+  "author": "Timur Laykov",
+  "license": "MIT",
+  "keywords": [
+    "MagicMirror",
+    "MagicMirror2",
+    "art",
+    "museum",
+    "Art Institute of Chicago",
+    "daily art",
+    "masterpiece",
+    "painting"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timurlaykov/MMM-MuseumMasterpiece.git"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}

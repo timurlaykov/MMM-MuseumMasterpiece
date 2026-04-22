@@ -1,0 +1,117 @@
+/* ═══════════════════════════════════════════════════════════════
+   MMM-MuseumMasterpiece — Stylesheet
+   Art Institute of Chicago daily artwork with curator descriptions
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── State messages ─────────────────────────────────────────── */
+.mm-loading, .mm-error, .mm-empty {
+  opacity: 0.7;
+  font-size: var(--mm-body-size, 14px);
+  color: var(--mm-body-color, #ddd);
+  font-style: italic;
+}
+
+/* ── Card container ─────────────────────────────────────────── */
+.mm-card {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  text-align: var(--mm-text-align, left);
+  flex-wrap: wrap;
+  max-width: 900px;
+}
+
+/* Layout variants */
+.mm-card.layout-left  { flex-direction: row; }
+.mm-card.layout-right { flex-direction: row; }
+.mm-card.layout-top {
+  flex-direction: column;
+  align-items: center;
+}
+.mm-card.layout-bottom {
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ── Image ──────────────────────────────────────────────────── */
+.mm-image {
+  border-radius: 6px;
+  display: block;
+  max-width: var(--mm-image-max-width, 420px);
+  max-height: 480px;
+  object-fit: contain;
+  background-color: rgba(255, 255, 255, 0.05);
+  background-size: cover;
+  background-position: center;
+  transition: opacity 0.8s ease-in-out;
+}
+
+/* ── Info panel ─────────────────────────────────────────────── */
+.mm-info {
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Title ──────────────────────────────────────────────────── */
+.mm-title {
+  font-weight: 700;
+  font-size: var(--mm-title-size, 20px);
+  color: var(--mm-title-color, #fff);
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+/* ── Artist / date meta line ────────────────────────────────── */
+.mm-meta {
+  font-size: var(--mm-body-size, 14px);
+  color: var(--mm-body-color, #ddd);
+  font-style: italic;
+  margin-bottom: 2px;
+  opacity: 0.95;
+}
+
+/* ── General body text (medium, department, etc.) ────────────── */
+.mm-body {
+  font-size: var(--mm-body-size, 14px);
+  color: var(--mm-body-color, #ddd);
+  margin: 1px 0;
+  opacity: 0.9;
+}
+
+.mm-faded {
+  opacity: 0.6;
+  font-size: calc(var(--mm-body-size, 14px) - 1px);
+}
+
+/* ── Curator description — the star of the show ─────────────── */
+.mm-description {
+  font-size: var(--mm-desc-size, 13px);
+  color: var(--mm-desc-color, rgba(255, 255, 255, 0.85));
+  line-height: 1.55;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Custom scrollbar for description (Chromium/Webkit) */
+.mm-description::-webkit-scrollbar {
+  width: 4px;
+}
+.mm-description::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mm-description::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* ── Attribution line ───────────────────────────────────────── */
+.mm-attrib {
+  margin-top: 8px;
+  font-size: var(--mm-attrib-size, 11px);
+  color: var(--mm-attrib-color, rgba(255, 255, 255, 0.5));
+}
