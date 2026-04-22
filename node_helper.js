@@ -124,8 +124,8 @@ module.exports = NodeHelper.create({
       throw new Error("Harvard Art Museums requires an API key in config. See README.");
     }
 
-    // 1. Search for artworks (returns subset of fields)
-    const q = encodeURIComponent("classification:Paintings AND imagepermissionlevel:0 AND verificationlevel:>=3");
+    // 1. Search for artworks that DEFINITELY have descriptions or contextual text
+    const q = encodeURIComponent("classification:Paintings AND imagepermissionlevel:0 AND verificationlevel:>=3 AND (description:* OR contextualtextcount:>0)");
     const searchUrl = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=${q}&hasimage=1&size=100&sort=rank&sortorder=desc`;
     
     const searchRes = await fetchFn(searchUrl);
@@ -136,11 +136,8 @@ module.exports = NodeHelper.create({
     // Pick based on daily seed
     const choice = this._pick(searchData.records, seed);
 
-    // 2. Fetch the FULL record for the specific object to get description/contextualtext
-    // Documentation: GET /object/OBJECT_ID
+    // 2. Fetch the FULL record to get contextualtext array (if needed)
     const detailUrl = `https://api.harvardartmuseums.org/object/${choice.objectid}?apikey=${apiKey}`;
-    console.log(`[MMM-MuseumMasterpiece] Fetching HAM Detail: ${detailUrl}`);
-    
     const detailRes = await fetchFn(detailUrl);
     const d = await detailRes.json();
 
@@ -148,17 +145,16 @@ module.exports = NodeHelper.create({
       throw new Error(d.error || "Failed to fetch object details from Harvard");
     }
 
-    // HAM Description Logic: Try description -> commentary -> labeltext -> contextualtext
+    // HAM Description Logic: description -> commentary -> labeltext -> contextualtext
     let desc = d.description || d.commentary || d.labeltext || "";
     
     // Fallback to contextualtext if still empty
     if (!desc && d.contextualtext && d.contextualtext.length > 0) {
-      // Find the longest text block in the contextual array
       const sortedTexts = [...d.contextualtext].sort((a, b) => (b.text || "").length - (a.text || "").length);
       desc = sortedTexts[0].text;
     }
 
-    // High-Res Image Logic: Correct IIIF usage based on documentation
+    // High-Res Image Logic: Use IIIF base URI
     let imageUrl = d.primaryimageurl;
     const iiifBase = d.images?.[0]?.iiifbaseuri || d.iiifbaseuri;
     
