@@ -124,39 +124,47 @@ module.exports = NodeHelper.create({
       throw new Error("Harvard Art Museums requires an API key in config. See README.");
     }
 
-    // Optimization: Filter for Paintings, unrestricted images (level 0), and good metadata (verification >= 3)
+    // 1. Search for artworks (returns subset of fields)
     const q = encodeURIComponent("classification:Paintings AND imagepermissionlevel:0 AND verificationlevel:>=3");
-    const url = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=${q}&hasimage=1&size=100&sort=rank&sortorder=desc`;
+    const searchUrl = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=${q}&hasimage=1&size=100&sort=rank&sortorder=desc`;
     
-    const res = await fetchFn(url);
-    const data = await res.json();
+    const searchRes = await fetchFn(searchUrl);
+    const searchData = await searchRes.json();
     
-    if (!data.records || data.records.length === 0) return null;
+    if (!searchData.records || searchData.records.length === 0) return null;
     
     // Pick based on daily seed
-    const d = this._pick(data.records, seed);
+    const choice = this._pick(searchData.records, seed);
+
+    // 2. Fetch the FULL record for the specific object to get description/contextualtext
+    // Documentation: GET /object/OBJECT_ID
+    const detailUrl = `https://api.harvardartmuseums.org/object/${choice.objectid}?apikey=${apiKey}`;
+    console.log(`[MMM-MuseumMasterpiece] Fetching HAM Detail: ${detailUrl}`);
+    
+    const detailRes = await fetchFn(detailUrl);
+    const d = await detailRes.json();
+
+    if (!d || d.error) {
+      throw new Error(d.error || "Failed to fetch object details from Harvard");
+    }
 
     // HAM Description Logic: Try description -> commentary -> labeltext -> contextualtext
     let desc = d.description || d.commentary || d.labeltext || "";
     
     // Fallback to contextualtext if still empty
     if (!desc && d.contextualtext && d.contextualtext.length > 0) {
-      // Find the longest text block in the contextual array (usually the Published Catalogue Text)
+      // Find the longest text block in the contextual array
       const sortedTexts = [...d.contextualtext].sort((a, b) => (b.text || "").length - (a.text || "").length);
       desc = sortedTexts[0].text;
     }
 
     // High-Res Image Logic: Correct IIIF usage based on documentation
     let imageUrl = d.primaryimageurl;
-    // Check if the canonical image has a IIIF base URI
     const iiifBase = d.images?.[0]?.iiifbaseuri || d.iiifbaseuri;
     
     if (iiifBase) {
-      // Construct the high-res URL. 
-      // Documentation says base + /full/size/0/default.jpg
       imageUrl = `${iiifBase}/full/${imageSize},/0/default.jpg`;
     } else if (imageUrl && !imageUrl.includes("/full/")) {
-      // Some Harvard primaryimageurls are NRS redirects that support IIIF parameters
       imageUrl = `${imageUrl}/full/${imageSize},/0/default.jpg`;
     }
 
