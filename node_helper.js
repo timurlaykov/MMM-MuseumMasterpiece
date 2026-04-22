@@ -14,7 +14,7 @@ module.exports = NodeHelper.create({
 
   async socketNotificationReceived(notif, payload) {
     if (notif === "AIC_FETCH") {
-      const { seed, imageSize, hamApiKey } = payload;
+      const { seed, imageSize, hamApiKey, providers } = payload;
       
       // 1. Check cache first
       if (this.cache[seed]) {
@@ -22,11 +22,11 @@ module.exports = NodeHelper.create({
       }
 
       try {
-        // 2. Determine Provider of the Day (Round-Robin)
-        const providers = ["AIC", "CMA", "HAM"];
+        // 2. Determine Provider of the Day (Round-Robin) from the user's list
+        const activeProviders = (providers && providers.length > 0) ? providers : ["AIC", "CMA", "HAM"];
         const dayHash = this._djb2(seed);
-        const providerIndex = Math.abs(dayHash % providers.length);
-        const provider = providers[providerIndex];
+        const providerIndex = Math.abs(dayHash % activeProviders.length);
+        const provider = activeProviders[providerIndex];
 
         console.log(`[MMM-MuseumMasterpiece] Seed: ${seed} | Hash: ${dayHash} | Provider: ${provider}`);
 

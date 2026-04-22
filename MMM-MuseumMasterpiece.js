@@ -8,6 +8,7 @@ Module.register("MMM-MuseumMasterpiece", {
     refreshAtMidnight: true,
 
     // ── API settings ───────────────────────────────────────────────
+    providers: ["AIC", "CMA", "HAM"], // Rotation list: AIC, CMA, HAM
     imageSize: 843,
     hamApiKey: "", // Required for Harvard Art Museums
 
@@ -49,7 +50,8 @@ Module.register("MMM-MuseumMasterpiece", {
     const fetchNow = () => this.sendSocketNotification("AIC_FETCH", {
       seed: this._todaySeed(),
       imageSize: this.config.imageSize,
-      hamApiKey: this.config.hamApiKey
+      hamApiKey: this.config.hamApiKey,
+      providers: this.config.providers
     });
 
     setTimeout(fetchNow, this.config.initialLoadDelay);
@@ -198,7 +200,8 @@ Module.register("MMM-MuseumMasterpiece", {
       this.sendSocketNotification("AIC_FETCH", {
         seed: this._todaySeed(),
         imageSize: this.config.imageSize,
-        hamApiKey: this.config.hamApiKey
+        hamApiKey: this.config.hamApiKey,
+        providers: this.config.providers
       });
       this._scheduleMidnightRefresh();
     }, next - new Date());
