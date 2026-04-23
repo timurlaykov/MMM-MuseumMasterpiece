@@ -12,7 +12,7 @@ Module.register("MMM-MuseumMasterpiece", {
     imageSize: 843,
     hamApiKey: "",
     rijksApiKey: "",
-    forceOffline: false, // 🧪 TEST MODE: Set to true to simulate no internet
+    forceOffline: false,
 
     // ── Layout ─────────────────────────────────────────────────────
     textPosition: "right",
@@ -44,7 +44,6 @@ Module.register("MMM-MuseumMasterpiece", {
     attribColor: "rgba(255,255,255,0.5)"
   },
 
-  // ── Offline Fallback Data (Mona Lisa) ──────────────────────────
   fallbackArt: {
     provider: "Musée du Louvre (Offline Fallback)",
     title: "Mona Lisa (La Gioconda)",
@@ -222,10 +221,21 @@ Module.register("MMM-MuseumMasterpiece", {
 
   _getSeed() {
     const d = new Date();
+    // Start with the basic date seed
     let seed = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    if (this.config.updateInterval < 60 * 60 * 1000) {
-      seed += `-${d.getHours()}-${d.getMinutes()}`;
+    
+    // ── Seed Granularity Fix ───────────────────────────────────────
+    // If the rotation is faster than once a day, we must add a 
+    // time-based component to the seed so the backend picks a new item.
+    if (this.config.updateInterval < 24 * 60 * 60 * 1000) {
+      // Create a "window index" based on the current time and the update interval
+      const intervalMinutes = Math.max(1, Math.floor(this.config.updateInterval / 60000));
+      const totalMinutesSinceMidnight = (d.getHours() * 60) + d.getMinutes();
+      const windowIndex = Math.floor(totalMinutesSinceMidnight / intervalMinutes);
+      
+      seed += `-w${windowIndex}`;
     }
+    
     return seed;
   },
 
