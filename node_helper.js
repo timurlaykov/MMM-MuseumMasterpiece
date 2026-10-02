@@ -91,15 +91,13 @@ module.exports = NodeHelper.create({
   async _fetchAIC(seed, imageSize) {
     try {
       const poolUrl = "https://api.artic.edu/api/v1/artworks/search?q=painting&is_public_domain=true&limit=100&fields=id";
-      const poolRes = await fetchFn(poolUrl);
-      const poolData = await poolRes.json();
+      const poolData = await this._fetchJson(poolUrl);
       if (!poolData.data?.length) return null;
       
       const choice = this._pick(poolData.data, seed);
       const detailUrl = `https://api.artic.edu/api/v1/artworks/${choice.id}?fields=id,title,artist_display,date_display,medium_display,description,short_description,thumbnail,image_id,style_title,place_of_origin,credit_line,dimensions,department_title`;
       
-      const detailRes = await fetchFn(detailUrl);
-      const detail = await detailRes.json();
+      const detail = await this._fetchJson(detailUrl);
       const d = detail.data;
 
       return {
@@ -124,8 +122,7 @@ module.exports = NodeHelper.create({
   async _fetchCMA(seed) {
     try {
       const url = "https://openaccess-api.clevelandart.org/api/artworks/?q=painting&has_image=1&limit=100";
-      const res = await fetchFn(url);
-      const data = await res.json();
+      const data = await this._fetchJson(url);
       if (!data.data?.length) return null;
       
       const d = this._pick(data.data, seed);
@@ -153,14 +150,12 @@ module.exports = NodeHelper.create({
       if (!apiKey) throw new Error("Harvard API key required");
       const q = encodeURIComponent("classification:Paintings AND imagepermissionlevel:0 AND verificationlevel:>=3 AND (description:* OR contextualtextcount:>0)");
       const searchUrl = `https://api.harvardartmuseums.org/object?apikey=${apiKey}&q=${q}&hasimage=1&size=100&sort=rank&sortorder=desc`;
-      const searchRes = await fetchFn(searchUrl);
-      const searchData = await searchRes.json();
+      const searchData = await this._fetchJson(searchUrl);
       if (!searchData.records?.length) return null;
       
       const choice = this._pick(searchData.records, seed);
       const detailUrl = `https://api.harvardartmuseums.org/object/${choice.objectid}?apikey=${apiKey}`;
-      const detailRes = await fetchFn(detailUrl);
-      const d = await detailRes.json();
+      const d = await this._fetchJson(detailUrl);
 
       let desc = d.description || d.commentary || d.labeltext || "";
       if (!desc && d.contextualtext?.length) {
@@ -193,14 +188,12 @@ module.exports = NodeHelper.create({
   async _fetchMET(seed) {
     try {
       const searchUrl = "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=painting";
-      const searchRes = await fetchFn(searchUrl);
-      const searchData = await searchRes.json();
+      const searchData = await this._fetchJson(searchUrl);
       if (!searchData.objectIDs?.length) return null;
       
       const choiceId = this._pick(searchData.objectIDs.slice(0, 500), seed);
       const detailUrl = `https://collectionapi.metmuseum.org/public/collection/v1/objects/${choiceId}`;
-      const detailRes = await fetchFn(detailUrl);
-      const d = await detailRes.json();
+      const d = await this._fetchJson(detailUrl);
 
       return {
         provider: "The Metropolitan Museum of Art",
@@ -224,14 +217,12 @@ module.exports = NodeHelper.create({
     try {
       const key = apiKey || "0fS5v4TH";
       const url = `https://www.rijksmuseum.nl/api/en/collection?key=${key}&format=json&type=painting&imgonly=True&ps=100`;
-      const res = await fetchFn(url);
-      const data = await res.json();
+      const data = await this._fetchJson(url);
       if (!data.artObjects?.length) return null;
       
       const d = this._pick(data.artObjects, seed);
       const detailUrl = `https://www.rijksmuseum.nl/api/en/collection/${d.objectNumber}?key=${key}&format=json`;
-      const detailRes = await fetchFn(detailUrl);
-      const detail = await detailRes.json();
+      const detail = await this._fetchJson(detailUrl);
       const obj = detail.artObject;
 
       return {
@@ -256,16 +247,30 @@ module.exports = NodeHelper.create({
     try {
       const query = encodeURIComponent(`${title} ${artist}`);
       const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&format=json&origin=*`;
-      const searchRes = await fetchFn(searchUrl);
-      const searchData = await searchRes.json();
+      const searchData = await this._fetchJson(searchUrl);
       if (!searchData.query?.search?.length) return null;
       
       const pageTitle = encodeURIComponent(searchData.query.search[0].title);
       const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${pageTitle}`;
-      const summaryRes = await fetchFn(summaryUrl);
-      const summaryData = await summaryRes.json();
+      const summaryData = await this._fetchJson(summaryUrl);
       return summaryData.extract || null;
     } catch (e) { return null; }
+  },
+
+  // Bound both the response headers and body read; never log URLs with API keys.
+  async _fetchJson(url) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs || 10000);
+    try {
+      const response = await fetchFn(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.warn(`[MMM-MuseumMasterpiece] Request failed (${new URL(url).hostname}): ${controller.signal.aborted ? "timeout" : "HTTP or network error"}`);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   },
 
   // ── Helpers ───────────────────────────────────────────────────────

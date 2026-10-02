@@ -1,6 +1,6 @@
 {
   "name": "mmm-museummasterpiece",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A MagicMirror² module that displays a daily masterpiece with full curator's description from the Art Institute of Chicago",
   "main": "MMM-MuseumMasterpiece.js",
   "author": "Timur Laykov",
@@ -21,5 +21,9 @@
   },
   "dependencies": {
     "node-fetch": "^2.7.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:live": "node test.js"
   }
 }

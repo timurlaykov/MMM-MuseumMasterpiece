@@ -90,6 +90,13 @@ You can fine-tune the look by adjusting these in the `config`:
 
 ## 🔧 Troubleshooting
 
+### Artwork stays on “Loading masterpiece…”
+Museum and Wikipedia requests time out after 10 seconds, including reading the response body. If the helper has not replied within `fetchTimeout` (default: 30000 ms), the display shows the bundled Mona Lisa. A later successful response can still replace it.
+
+Image downloads have a separate `imageLoadTimeout` (default: 15000 ms). A failed or stalled image uses the same fallback. Failed refreshes keep the current artwork visible.
+
+Run `npm test` for offline regression tests. `npm run test:live` runs the existing network smoke test and requires reachable museum APIs.
+
 ### My display is blank
 Check the MagicMirror server logs (`pm2 logs` or `npm start`). 
 - **Missing API Key**: Ensure you've added your keys for **HAM** and **RIJKS**.

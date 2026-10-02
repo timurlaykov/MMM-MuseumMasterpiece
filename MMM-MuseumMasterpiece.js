@@ -5,6 +5,8 @@ Module.register("MMM-MuseumMasterpiece", {
     // ── Fetch cadence ──────────────────────────────────────────────
     updateInterval: 3 * 60 * 60 * 1000,
     initialLoadDelay: 3000,
+    fetchTimeout: 30000,
+    imageLoadTimeout: 15000,
     refreshAtMidnight: true,
 
     // ── API settings ───────────────────────────────────────────────
@@ -78,6 +80,9 @@ Module.register("MMM-MuseumMasterpiece", {
   },
 
   sendFetchRequest() {
+    if (this.isFetching) return;
+    this.isFetching = true;
+    this._fetchTimeout = setTimeout(() => this._showFallback(), this.config.fetchTimeout);
     if (this.config.forceOffline) {
       console.warn("MMM-MuseumMasterpiece: forceOffline is enabled. Simulating network failure.");
       setTimeout(() => {
@@ -86,7 +91,6 @@ Module.register("MMM-MuseumMasterpiece", {
       return;
     }
 
-    this.isFetching = true;
     this.sendSocketNotification("AIC_FETCH", {
       seed: this._getSeed(),
       imageSize: this.config.imageSize,
@@ -102,30 +106,48 @@ Module.register("MMM-MuseumMasterpiece", {
 
   socketNotificationReceived(notif, payload) {
     if (notif === "AIC_RESULT") {
+      clearTimeout(this._fetchTimeout);
+      this._cancelImageLoad();
       const img = new Image();
-      img.src = payload.image;
+      this._pendingImage = img;
+      const fail = () => {
+        this._cancelImageLoad();
+        this._showFallback();
+      };
       img.onload = () => {
+        this._cancelImageLoad();
         this.loaded = true;
         this.error = null;
         this.art = payload;
         this.isFetching = false;
         this.updateDom(1000);
       };
-      img.onerror = () => {
-        console.error("MMM-MuseumMasterpiece: Failed to pre-load image:", payload.image);
-        this.isFetching = false;
-      };
+      img.onerror = fail;
+      this._imageTimeout = setTimeout(fail, this.config.imageLoadTimeout);
+      img.src = payload.image;
     } else if (notif === "AIC_ERROR") {
-      this.isFetching = false;
-      
-      if (!this.art) {
-        this.art = this.fallbackArt;
-        this.loaded = true;
-        this.error = null;
-        this.updateDom(1000);
-      } else {
-        console.warn("MMM-MuseumMasterpiece: Update failed. Keeping current masterpiece.");
-      }
+      this._cancelImageLoad();
+      this._showFallback();
+    }
+  },
+
+  _cancelImageLoad() {
+    clearTimeout(this._imageTimeout);
+    if (this._pendingImage) {
+      this._pendingImage.onload = null;
+      this._pendingImage.onerror = null;
+      this._pendingImage = null;
+    }
+  },
+
+  _showFallback() {
+    clearTimeout(this._fetchTimeout);
+    this.isFetching = false;
+    if (!this.art) {
+      this.art = this.fallbackArt;
+      this.loaded = true;
+      this.error = null;
+      this.updateDom(1000);
     }
   },
 
