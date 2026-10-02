@@ -103,3 +103,40 @@ test('exhausted providers notify the frontend instead of silently returning', as
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], 'AIC_ERROR');
 });
+
+test('blocked museum image retries another provider and displays its downloaded image', () => {
+  const { instance, images, sent } = frontend();
+  const firstRequest = sent[0][1].requestId;
+  instance.socketNotificationReceived('AIC_RESULT', { requestId: firstRequest, providerCode: 'AIC', image: 'https://example.org/blocked.jpg' });
+  images[0].onerror();
+  assert.equal(sent.length, 2);
+  assert.deepEqual([...sent[1][1].excludedProviders], ['AIC']);
+  const artwork = { requestId: sent[1][1].requestId, providerCode: 'CMA', title: 'Downloaded painting', image: 'https://example.org/painting.jpg' };
+  instance.socketNotificationReceived('AIC_RESULT', artwork);
+  images[1].onload();
+  assert.equal(instance.art, artwork);
+  assert.equal(instance.art.isOffline, undefined);
+});
+
+test('responses from another kiosk cannot cancel or replace the current request', () => {
+  const { instance, images } = frontend();
+  instance.socketNotificationReceived('AIC_RESULT', { requestId: 'another-kiosk', image: 'https://example.org/other.jpg' });
+  instance.socketNotificationReceived('AIC_ERROR', { requestId: 'another-kiosk' });
+  assert.equal(images.length, 0);
+  assert.equal(instance.isFetching, true);
+  assert.equal(instance.art, null);
+});
+
+test('retry skips cached broken image and correlates reply with requesting kiosk', async () => {
+  const helper = backend(async () => { throw new Error('unexpected network request'); });
+  helper.start();
+  helper._addToCache('today', { providerCode: 'AIC', image: 'blocked' });
+  helper._fetchCMA = async () => ({ title: 'Painting', image: 'https://example.org/art.jpg', description: 'A curator description long enough to qualify as a useful museum artwork description.' });
+  const sent = [];
+  helper.sendSocketNotification = (...args) => sent.push(args);
+  await helper.socketNotificationReceived('AIC_FETCH', { seed: 'today', providers: ['AIC', 'CMA'], excludedProviders: ['AIC'], requestId: 'kiosk-2' });
+  assert.equal(sent[0][0], 'AIC_RESULT');
+  assert.equal(sent[0][1].providerCode, 'CMA');
+  assert.equal(sent[0][1].requestId, 'kiosk-2');
+  assert.equal(helper.cacheOrder.length, 1);
+});

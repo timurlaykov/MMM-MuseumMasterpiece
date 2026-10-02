@@ -16,23 +16,26 @@ module.exports = NodeHelper.create({
 
   async socketNotificationReceived(notif, payload) {
     if (notif === "AIC_FETCH") {
-      const { seed, imageSize, hamApiKey, rijksApiKey, providers } = payload;
+      const { seed, imageSize, hamApiKey, rijksApiKey, providers, requestId } = payload;
+      const excluded = Array.isArray(payload.excludedProviders) ? payload.excludedProviders : [];
+      const available = (providers?.length ? providers : ["AIC", "CMA", "HAM", "MET", "RIJKS"])
+        .filter(provider => !excluded.includes(provider) && (provider !== "HAM" || hamApiKey));
+      const reply = (notification, data) => this.sendSocketNotification(notification, { ...data, requestId });
       
-      if (this.cache[seed]) {
-        return this.sendSocketNotification("AIC_RESULT", this.cache[seed]);
+      if (this.cache[seed] && available.includes(this.cache[seed].providerCode)) {
+        return reply("AIC_RESULT", this.cache[seed]);
       }
 
       try {
         let artData = null;
         let attempts = 0;
         let activeSeed = seed;
-        const maxAttempts = 5;
+        const maxAttempts = available.length ? Math.max(5, available.length) : 0;
+        const firstProvider = Math.abs(this._djb2(seed) % available.length);
 
         while (attempts < maxAttempts) {
-          const activeProviders = (providers && providers.length > 0) ? providers : ["AIC", "CMA", "HAM", "MET", "RIJKS"];
-          const dayHash = this._djb2(activeSeed);
-          const providerIndex = Math.abs(dayHash % activeProviders.length);
-          const provider = activeProviders[providerIndex];
+          // Visit every available museum before retrying one that failed.
+          const provider = available[(firstProvider + attempts) % available.length];
 
           console.log(`[MMM-MuseumMasterpiece] Attempt ${attempts + 1} | Seed: ${activeSeed} | Provider: ${provider}`);
 
@@ -45,7 +48,9 @@ module.exports = NodeHelper.create({
             default: artData = await this._fetchAIC(activeSeed, imageSize); break;
           }
 
+          if (artData && !artData.image) artData = null;
           if (artData) {
+            artData.providerCode = provider;
             if (!artData.description || artData.description.length < 50) {
               const fallback = await this._fetchWikipediaSummary(artData.title, artData.artist);
               if (fallback) {
@@ -66,13 +71,14 @@ module.exports = NodeHelper.create({
 
         if (artData) {
           this._addToCache(seed, artData);
-          this.sendSocketNotification("AIC_RESULT", artData);
+          console.log(`[MMM-MuseumMasterpiece] Selected ${artData.providerCode}: ${artData.title}`);
+          reply("AIC_RESULT", artData);
         } else {
           throw new Error(`Exhausted ${maxAttempts} attempts. Could not find an artwork with a description.`);
         }
       } catch (err) {
         console.error(`[MMM-MuseumMasterpiece] Fetch error:`, err);
-        this.sendSocketNotification("AIC_ERROR", { message: err.message });
+        reply("AIC_ERROR", { message: err.message });
       }
     }
   },
@@ -80,6 +86,7 @@ module.exports = NodeHelper.create({
   _addToCache(seed, data) {
     // Prevent memory overflow by keeping only the most recent entries
     this.cache[seed] = data;
+    this.cacheOrder = this.cacheOrder.filter(key => key !== seed);
     this.cacheOrder.push(seed);
     if (this.cacheOrder.length > this.maxCacheEntries) {
       const oldKey = this.cacheOrder.shift();

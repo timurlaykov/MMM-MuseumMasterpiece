@@ -79,8 +79,10 @@ Module.register("MMM-MuseumMasterpiece", {
     }
   },
 
-  sendFetchRequest() {
+  sendFetchRequest(retry = false) {
     if (this.isFetching) return;
+    if (!retry) this._excludedProviders = [];
+    this._requestId = `${this.identifier || "art"}-${Date.now()}-${this._requestSequence = (this._requestSequence || 0) + 1}`;
     this.isFetching = true;
     this._fetchTimeout = setTimeout(() => this._showFallback(), this.config.fetchTimeout);
     if (this.config.forceOffline) {
@@ -96,7 +98,9 @@ Module.register("MMM-MuseumMasterpiece", {
       imageSize: this.config.imageSize,
       hamApiKey: this.config.hamApiKey,
       rijksApiKey: this.config.rijksApiKey,
-      providers: this.config.providers
+      providers: this.config.providers,
+      excludedProviders: this._excludedProviders,
+      requestId: this._requestId
     });
   },
 
@@ -105,6 +109,8 @@ Module.register("MMM-MuseumMasterpiece", {
   },
 
   socketNotificationReceived(notif, payload) {
+    // Helpers broadcast to every kiosk; ignore replies belonging to other requests.
+    if (payload.requestId && payload.requestId !== this._requestId) return;
     if (notif === "AIC_RESULT") {
       clearTimeout(this._fetchTimeout);
       this._cancelImageLoad();
@@ -113,12 +119,22 @@ Module.register("MMM-MuseumMasterpiece", {
       const fail = () => {
         this._cancelImageLoad();
         this._showFallback();
+        // A metadata response does not prove that the museum image is accessible.
+        // Try another configured provider rather than caching a broken image forever.
+        if (payload.providerCode && !this._excludedProviders.includes(payload.providerCode)) {
+          console.warn(`MMM-MuseumMasterpiece: Image failed for ${payload.providerCode}; trying another museum.`);
+          this._excludedProviders.push(payload.providerCode);
+          if (this.config.providers.some(provider => !this._excludedProviders.includes(provider))) {
+            this.sendFetchRequest(true);
+          }
+        }
       };
       img.onload = () => {
         this._cancelImageLoad();
         this.loaded = true;
         this.error = null;
         this.art = payload;
+        console.log(`MMM-MuseumMasterpiece: Downloaded artwork from ${payload.providerCode}: ${payload.title}`);
         this.isFetching = false;
         this.updateDom(1000);
       };
