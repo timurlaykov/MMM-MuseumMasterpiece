@@ -140,3 +140,41 @@ test('retry skips cached broken image and correlates reply with requesting kiosk
   assert.equal(sent[0][1].requestId, 'kiosk-2');
   assert.equal(helper.cacheOrder.length, 1);
 });
+
+test('Met uses paginated replacement search and existing object endpoint', async () => {
+  const urls = [];
+  const helper = backend(async url => {
+    urls.push(url);
+    return { ok: true, json: async () => url.includes('/search?') ? { objectIDs: [123] } : { title: 'Painting', primaryImageSmall: 'small.jpg', primaryImage: 'large.jpg' } };
+  });
+  const art = await helper._fetchMET('today');
+  assert.match(urls[0], /v1\.1\/search\?.*offset=0&limit=500/);
+  assert.match(urls[1], /v1\/objects\/123$/);
+  assert.equal(art.image, 'small.jpg');
+});
+
+test('Rijksmuseum resolves linked records and English museum description without an API key', async () => {
+  const en = [{ id: 'http://vocab.getty.edu/aat/300388277' }];
+  const records = {
+    1: { id: 'https://id.rijksmuseum.nl/1', identified_by: [{ type: 'Name', content: 'Sea', language: en }], shows: [{ id: 'https://id.rijksmuseum.nl/2' }], subject_of: [{ language: en, part: [{ content: 'Museum description', classified_as: [{ id: 'http://vocab.getty.edu/aat/300048722' }] }] }] },
+    2: { digitally_shown_by: [{ id: 'https://id.rijksmuseum.nl/3' }] },
+    3: { access_point: [{ id: 'https://iiif.micr.io/abc/full/max/0/default.jpg' }] }
+  };
+  const helper = backend(async url => ({ ok: true, json: async () => url.includes('/search/') ? { orderedItems: [{ id: 'https://id.rijksmuseum.nl/1' }] } : records[new URL(url).pathname.slice(1)] }));
+  const art = await helper._fetchRIJKS('today', 843);
+  assert.equal(art.title, 'Sea');
+  assert.equal(art.description, 'Museum description');
+  assert.equal(art.image, 'https://iiif.micr.io/abc/full/843,/0/default.jpg');
+  await assert.rejects(helper._resolveRijks({ id: 'https://example.org/private' }), /Invalid/);
+});
+
+test('AIC is attempted after other configured providers', async () => {
+  const helper = backend(async () => { throw new Error('unexpected'); });
+  helper.start();
+  const calls = [];
+  helper._fetchAIC = async () => { calls.push('AIC'); return null; };
+  helper._fetchCMA = async () => { calls.push('CMA'); return null; };
+  helper.sendSocketNotification = () => {};
+  await helper.socketNotificationReceived('AIC_FETCH', {seed:'today', providers:['AIC','CMA']});
+  assert.deepEqual(calls.slice(0,2), ['CMA','AIC']);
+});

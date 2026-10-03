@@ -16,9 +16,9 @@ module.exports = NodeHelper.create({
 
   async socketNotificationReceived(notif, payload) {
     if (notif === "AIC_FETCH") {
-      const { seed, imageSize, hamApiKey, rijksApiKey, providers, requestId } = payload;
+      const { seed, imageSize, hamApiKey, providers, requestId } = payload;
       const excluded = Array.isArray(payload.excludedProviders) ? payload.excludedProviders : [];
-      const available = (providers?.length ? providers : ["AIC", "CMA", "HAM", "MET", "RIJKS"])
+      const available = (providers?.length ? providers : ["CMA", "HAM", "MET", "RIJKS", "AIC"])
         .filter(provider => !excluded.includes(provider) && (provider !== "HAM" || hamApiKey));
       const reply = (notification, data) => this.sendSocketNotification(notification, { ...data, requestId });
       
@@ -31,11 +31,13 @@ module.exports = NodeHelper.create({
         let attempts = 0;
         let activeSeed = seed;
         const maxAttempts = available.length ? Math.max(5, available.length) : 0;
-        const firstProvider = Math.abs(this._djb2(seed) % available.length);
+        const primary = available.filter(provider => provider !== "AIC");
+        const start = primary.length ? Math.abs(this._djb2(seed) % primary.length) : 0;
+        const order = [...primary.slice(start), ...primary.slice(0, start), ...available.filter(provider => provider === "AIC")];
 
         while (attempts < maxAttempts) {
           // Visit every available museum before retrying one that failed.
-          const provider = available[(firstProvider + attempts) % available.length];
+          const provider = order[attempts % order.length];
 
           console.log(`[MMM-MuseumMasterpiece] Attempt ${attempts + 1} | Seed: ${activeSeed} | Provider: ${provider}`);
 
@@ -43,7 +45,7 @@ module.exports = NodeHelper.create({
             case "CMA": artData = await this._fetchCMA(activeSeed); break;
             case "HAM": artData = await this._fetchHAM(activeSeed, hamApiKey, imageSize); break;
             case "MET": artData = await this._fetchMET(activeSeed); break;
-            case "RIJKS": artData = await this._fetchRIJKS(activeSeed, rijksApiKey); break;
+            case "RIJKS": artData = await this._fetchRIJKS(activeSeed, imageSize); break;
             case "AIC":
             default: artData = await this._fetchAIC(activeSeed, imageSize); break;
           }
@@ -194,7 +196,7 @@ module.exports = NodeHelper.create({
   // ── Metropolitan Museum of Art (MET) ──────────────────────────────
   async _fetchMET(seed) {
     try {
-      const searchUrl = "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=painting";
+      const searchUrl = "https://collectionapi.metmuseum.org/public/collection/v1.1/search?hasImages=true&q=painting&offset=0&limit=500";
       const searchData = await this._fetchJson(searchUrl);
       if (!searchData.objectIDs?.length) return null;
       
@@ -209,7 +211,7 @@ module.exports = NodeHelper.create({
         date: d.objectDate,
         medium: d.medium,
         description: "",
-        image: d.primaryImage || d.primaryImageSmall,
+        image: d.primaryImageSmall || d.primaryImage,
         style: d.culture,
         origin: d.country || d.culture,
         creditLine: d.creditLine,
@@ -220,33 +222,54 @@ module.exports = NodeHelper.create({
   },
 
   // ── Rijksmuseum (RIJKS) ───────────────────────────────────────────
-  async _fetchRIJKS(seed, apiKey) {
+  async _fetchRIJKS(seed, imageSize = 843) {
     try {
-      const key = apiKey || "0fS5v4TH";
-      const url = `https://www.rijksmuseum.nl/api/en/collection?key=${key}&format=json&type=painting&imgonly=True&ps=100`;
-      const data = await this._fetchJson(url);
-      if (!data.artObjects?.length) return null;
-      
-      const d = this._pick(data.artObjects, seed);
-      const detailUrl = `https://www.rijksmuseum.nl/api/en/collection/${d.objectNumber}?key=${key}&format=json`;
-      const detail = await this._fetchJson(detailUrl);
-      const obj = detail.artObject;
-
+      const data = await this._fetchJson("https://data.rijksmuseum.nl/search/collection?type=painting&imageAvailable=true");
+      if (!data.orderedItems?.length) return null;
+      const obj = await this._resolveRijks(this._pick(data.orderedItems, seed));
+      // Linked Art separates artwork, visual representation, and digital image.
+      let image;
+      for (const ref of (obj.shows || []).slice(0, 3)) {
+        const visual = await this._resolveRijks(ref);
+        for (const digitalRef of (visual.digitally_shown_by || []).slice(0, 3)) {
+          const digital = await this._resolveRijks(digitalRef);
+          image = digital.access_point?.map(point => point.id).find(url => url?.startsWith("https://iiif.micr.io/"));
+          if (image) break;
+        }
+        if (image) break;
+      }
+      if (!image) return null;
+      const width = Math.max(1, Math.min(2000, Number(imageSize) || 843));
+      image = image.replace(/\/full\/max\//, `/full/${width},/`);
+      const descriptions = [];
+      const visit = (node, english = false) => {
+        const isEnglish = node.language?.length ? node.language.some(lang => lang.id?.endsWith("/300388277")) : english;
+        if (isEnglish && node.content && node.classified_as?.some(type => type.id?.endsWith("/300048722"))) descriptions.push(node.content);
+        (node.part || []).forEach(part => visit(part, isEnglish));
+      };
+      (obj.subject_of || []).forEach(node => visit(node));
       return {
         provider: "Rijksmuseum",
-        title: obj.title,
-        artist: obj.principalMaker,
-        date: obj.dating?.presentingDate,
-        medium: obj.physicalMedium,
-        description: this._stripHtml(obj.description || obj.plaqueDescriptionEnglish || ""),
-        image: obj.webImage?.url,
-        style: obj.materials?.join(", "),
+        title: this._rijksText((obj.identified_by || []).filter(item => item.type === "Name")),
+        artist: this._rijksText(obj.produced_by?.referred_to_by) || "Unknown Artist",
+        date: this._rijksText(obj.produced_by?.timespan?.identified_by),
+        description: this._stripHtml(descriptions.join(" ")),
+        image,
         origin: "Netherlands",
-        creditLine: "Rijksmuseum Open Access",
-        dimensions: obj.subTitle,
-        department: obj.classification?.objectName?.[0]
+        creditLine: "Rijksmuseum",
+        sourceUrl: obj.id
       };
     } catch (e) { return null; }
+  },
+
+  _rijksText(items = []) {
+    return (items.find(item => item.language?.some(lang => lang.id?.endsWith("/300388277"))) || items.find(item => item.content))?.content || "";
+  },
+
+  async _resolveRijks(ref) {
+    // Only dereference the museum's canonical identifiers.
+    if (!/^https:\/\/id\.rijksmuseum\.nl\/\d+$/.test(ref?.id || "")) throw new Error("Invalid Rijksmuseum identifier");
+    return this._fetchJson(`${ref.id}?_profile=la-framed`);
   },
 
   // ── Wikipedia/Wikidata Fallback ───────────────────────────────────

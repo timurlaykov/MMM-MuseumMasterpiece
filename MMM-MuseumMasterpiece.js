@@ -10,7 +10,7 @@ Module.register("MMM-MuseumMasterpiece", {
     refreshAtMidnight: true,
 
     // ── API settings ───────────────────────────────────────────────
-    providers: ["AIC", "CMA", "HAM", "MET", "RIJKS"], 
+    providers: ["CMA", "HAM", "MET", "RIJKS", "AIC"],
     imageSize: 843,
     hamApiKey: "",
     rijksApiKey: "",

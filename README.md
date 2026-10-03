@@ -48,7 +48,7 @@ Add the following to your `config/config.js` file:
     // --- Providers ---
     providers: ["AIC", "CMA", "HAM", "MET", "RIJKS"], 
     hamApiKey: "YOUR_HARVARD_API_KEY",    // Free at harvardartmuseums.org
-    rijksApiKey: "YOUR_RIJKS_API_KEY",    // Free at rijksmuseum.nl
+    // Rijksmuseum no longer requires an API key.    // Free at rijksmuseum.nl
     
     // --- Layout ---
     textPosition: "right",              // "left" | "right" | "top" | "bottom"
@@ -73,7 +73,7 @@ Add the following to your `config/config.js` file:
 | :--- | :--- | :--- | :--- |
 | **AIC** | Art Institute of Chicago | No | ⭐⭐⭐⭐⭐ (Historical) |
 | **CMA** | Cleveland Museum of Art | No | ⭐⭐⭐⭐ (Descriptive) |
-| **RIJKS** | Rijksmuseum (Amsterdam) | **Yes** (Free) | ⭐⭐⭐⭐⭐ (Masterclass) |
+| **RIJKS** | Rijksmuseum (Amsterdam) | No | ⭐⭐⭐⭐⭐ (Masterclass) |
 | **HAM** | Harvard Art Museums | **Yes** (Free) | ⭐⭐⭐⭐ (Curated) |
 | **MET** | Metropolitan Museum (NY) | No | ⭐⭐⭐ (Enhanced by Wikipedia) |
 
@@ -114,3 +114,10 @@ MIT — See [LICENSE](LICENSE) for details.
 - Data provided by AIC, CMA, HAM, The MET, and Rijksmuseum.
 - Wikipedia REST API for the artwork story fallback.
 - IIIF Consortium for image delivery standards.
+
+## API migrations (1.0.3)
+
+- Met search uses the paginated `/public/collection/v1.1/search` endpoint with `offset=0&limit=500`, preserving the previous 500-result selection pool size. Object details remain on v1. Search ordering can differ from the retired API.
+- Rijksmuseum uses keyless Search and Linked Art APIs, following artwork → visual item → digital object to its official Micrio IIIF image. The old `rijksApiKey` option is ignored for compatibility.
+- Cleveland, Harvard (when configured), Met, and Rijksmuseum rotate as primary providers. AIC is tried after these providers because its image delivery may reject requests even when metadata succeeds.
+- References: https://metmuseum.github.io/ and https://data.rijksmuseum.nl/docs/

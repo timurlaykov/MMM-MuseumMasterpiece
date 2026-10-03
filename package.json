@@ -1,6 +1,6 @@
 {
   "name": "mmm-museummasterpiece",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A MagicMirror² module that displays a daily masterpiece with full curator's description from the Art Institute of Chicago",
   "main": "MMM-MuseumMasterpiece.js",
   "author": "Timur Laykov",
